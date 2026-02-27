@@ -1,0 +1,16 @@
+{
+  "ExpandedNodes": [
+    "",
+    "\\app",
+    "\\app\\config",
+    "\\app\\main",
+    "\\app\\src",
+    "\\app\\src\\domain",
+    "\\app\\src\\domain\\entities",
+    "\\app\\src\\domain\\models",
+    "\\app\\src\\integration",
+    "\\app\\src\\riceFields"
+  ],
+  "SelectedNode": "\\app\\config\\database_info.py",
+  "PreviewInSolutionExplorer": false
+}

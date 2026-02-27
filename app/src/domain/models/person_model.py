@@ -2,7 +2,9 @@ class Person:
 
     __idPerson: int
     __firstName: str
+    __secondName: str
     __lastName: str
+    __platform: str
 
 
     @property
@@ -28,6 +30,14 @@ class Person:
     @lastname.setter
     def lastname(self, value: str):
         self.__lastName = value
+
+    @property
+    def platform(self):
+        return self.__platform
+
+    @platform.setter
+    def platform(self, value: str):
+        self.__platform = value
 
     @property
     def fullname(self):
