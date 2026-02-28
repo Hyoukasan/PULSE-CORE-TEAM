@@ -24,6 +24,14 @@ class Person:
         self.__firstName = value
 
     @property
+    def secondname(self):
+        return self.__secondName
+
+    @secondname.setter
+    def secondname(self, value: str):
+        self.__secondName = value
+
+    @property
     def lastname(self):
         return self.__lastName
 
@@ -41,4 +49,4 @@ class Person:
 
     @property
     def fullname(self):
-        return f"{self.__firstName or None} {self.__lastName or None}"
+        return f"{self.__firstName or None} {self.__lastName or None} {self.__secondName or None}"

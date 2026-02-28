@@ -1,7 +1,6 @@
 from flask import Flask
 from flask_cors import CORS
-from .dotenv import env
-from .database_info import setConfig
+from app.src.extensions.database_info import setConfig
 
 env = dotenv_values(".env")
 

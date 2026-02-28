@@ -1,9 +1,9 @@
-from config.database import database as db
-from .person_entity import PersonEntity
+from ..config.database import database as db
+from .models.student_model import Student
 
 
-class studentEntity(db.Model):
-    __tablename__ = "core_user"
+class studentEntity(Student, db.Model):
+    __tablename__ = "core_student"
 
     idUser = db.Column(db.Integer, primary_key=True)
     idGroup = db.Column(db.Integer)

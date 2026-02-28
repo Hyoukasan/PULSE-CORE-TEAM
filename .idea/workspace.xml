@@ -5,9 +5,18 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="126aa63c-96ea-4763-b410-0fbad08048fc" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/.idea/Pulse.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/src/config/admin_model.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/src/config/base.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/src/config/base.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/src/config/prod.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/src/config/prod.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/config/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/src/config/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/config/database_info.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/src/extensions/database_info.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/config/dotenv.py" beforeDir="false" afterPath="$PROJECT_DIR$/dotenv.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/config/route_middleware.py" beforeDir="false" afterPath="$PROJECT_DIR$/route_middleware.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/src/domain/entities/person_entity.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/src/domain/entities/student_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/src/domain/entities/student_entity.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/src/domain/models/person_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/src/config/person_model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/src/domain/models/student_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/src/config/student_model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pulse_project.py" beforeDir="false" afterPath="$PROJECT_DIR$/pulse_project.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -44,13 +53,22 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "git-widget-placeholder": "daniil__branch",
+    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
-}</component>
+}]]></component>
+  <component name="RecentsManager">
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\Pulse\app\src\config" />
+      <recent name="C:\Pulse\app\src" />
+      <recent name="C:\Pulse" />
+      <recent name="C:\Pulse\app\src\extensions" />
+    </key>
+  </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
@@ -68,5 +86,16 @@
       <updated>1771801481819</updated>
     </task>
     <servers />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
   </component>
 </project>

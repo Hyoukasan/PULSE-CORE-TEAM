@@ -1,7 +1,7 @@
 from flask import Flask
 import logging
 from dotenv import dotenv_values
-from app.config import setConfig, database 
+from app.src.config import setConfig
 
 env = dotenv_values(".env")
 

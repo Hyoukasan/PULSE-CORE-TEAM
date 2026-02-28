@@ -1,12 +1,11 @@
 from .person import Person
 
-class Student:
+class Student(Person):
 
     __idStudent: int
-    __person: Person
     __idGroup: int
     __password: str
-    __banStatus: bool
+    __banStatus: int
 
     @property
     def idstudent(self):
@@ -15,14 +14,6 @@ class Student:
     @idstudent.setter
     def idstudent(self, value: int):
         self.__idStudent = value
-
-    @property
-    def person(self):
-        return self.__person
-
-    @person.setter
-    def person(self, value: Person):
-        self.__person = value
 
     @property
     def idGroup(self):
@@ -34,7 +25,7 @@ class Student:
 
     @property
     def password(self):
-        return self.__password
+        return self.__passwor
 
     @password.setter
     def password(self, value: str):
@@ -45,5 +36,5 @@ class Student:
         return self.banStatus
 
     @banStatus.setter
-    def banStatus(self, value: bool):
+    def banStatus(self, value: int):
         self.__banStatus = value
