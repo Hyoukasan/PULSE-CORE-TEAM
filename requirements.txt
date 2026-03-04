@@ -1,1 +1,4 @@
-python main.py
+Flask
+Flask-SQLAlchemy
+Flask-Migrate
+Flask-Mail
