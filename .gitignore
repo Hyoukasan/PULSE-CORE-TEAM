@@ -1,3 +1,8 @@
+# PyCharm
+.idea/
+
+# Pulse_v2_2
 .env
 pulse_project.db
-.idea/
+
+
