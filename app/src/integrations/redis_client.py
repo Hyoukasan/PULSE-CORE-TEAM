@@ -8,8 +8,7 @@ def init_redis(app):
     app.redis_client = redis.Redis(
         host=app.config['REDIS_HOST'],
         port=app.config['REDIS_PORT'],
-        db=app.config['REDIS_DB'],
-        #password=app.config.get('REDIS_PASSWORD'),
+        password=app.config.get('REDIS_PASSWORD'),
         decode_responses=True
     )
 
