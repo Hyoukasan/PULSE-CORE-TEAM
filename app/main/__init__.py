@@ -1,6 +1,7 @@
 import os
 
 from flask import Flask
+from flask_migrate import Migrate
 from dotenv import load_dotenv
 
 from .config import config
@@ -17,6 +18,11 @@ def create_app(config_name="default"):
     db.init_app(app)
     init_redis(app)
 
+    from app.src.domain.user import User
+    from app.src.domain.role import Role
+
+    with app.app_context():
+        db.create_all()
 
     return app
 

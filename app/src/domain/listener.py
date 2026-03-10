@@ -1,3 +1,3 @@
 from ..domain.user import User
 
-class Listener(User):
+#class Listener(User):
