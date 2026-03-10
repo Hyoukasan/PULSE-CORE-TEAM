@@ -8,3 +8,4 @@ class Role(db.Model):
     user_role = db.Column(db.String(), unique=True, nullable=False)
 
     users = db.relationship("User", back_populates="role")
+    title = db.Column(db.String(100))
