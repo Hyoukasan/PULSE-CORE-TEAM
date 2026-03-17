@@ -1,4 +1,12 @@
+from __future__ import annotations
+
+import sqlalchemy as sa
+import sqlalchemy.orm as so
+
 from werkzeug.security import generate_password_hash, check_password_hash
+
+from datetime import datetime
+from typing import Optional
 
 from ..integrations.db import db
 
@@ -6,16 +14,17 @@ class User(db.Model):
 
     __tablename__ = "users"
 
-    id = db.Column(db.Integer, primary_key=True)
+    id: so.Mapped[int] = so.mapped_column(primary_key=True)
+    username: so.Mapped[str] = so.mapped_column(sa.String(64), index=True,unique=True)
+    email: so.Mapped[str] = so.mapped_column(sa.String(120), nullable=False,unique=True)
 
+    role_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("roles.id"), nullable=False)
+    role: so.Mapped["Role"] = so.relationship(back_populates="users")
 
-    role_id = db.Column(db.Integer, db.ForeignKey('roles.id'), nullable=False)
-    role = db.relationship("Role", back_populates="users")
+    password_hash: so.Mapped[str] = so.mapped_column(sa.String(255), nullable=False)
 
-    username = db.Column(db.String(64), nullable=False,unique=True)
-    password_hash = db.Column(db.String(255), nullable=False)
+    ban_expires_at: so.Mapped[Optional[datetime]] = so.mapped_column(sa.DateTime, default=None)
 
-    ban_expires_at = db.Column(db.DateTime, default=None, nullable=True)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)

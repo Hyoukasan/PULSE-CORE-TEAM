@@ -1,11 +1,15 @@
+from __future__ import annotations
+
+import sqlalchemy as sa
+import sqlalchemy.orm as so
+
 from ..integrations.db import db
 
 class Role(db.Model):
 
     __tablename__ = "roles"
 
-    id = db.Column(db.Integer(), primary_key=True)
-    user_role = db.Column(db.String(), unique=True, nullable=False)
+    id: so.Mapped[int] = so.mapped_column(sa.Integer(), primary_key=True)
+    role: so.Mapped[str] = so.mapped_column(db.String(16), unique=True, nullable=False)
 
-    users = db.relationship("User", back_populates="role")
-    title = db.Column(db.String(100))
+    users: so.Mapped[list["User"]] = so.relationship(back_populates="role")

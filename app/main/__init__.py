@@ -20,6 +20,7 @@ def create_app(config_name="default"):
 
     from app.src.domain.user import User
     from app.src.domain.role import Role
+    from app.src.domain.professor import Professor
 
     with app.app_context():
         db.drop_all()
