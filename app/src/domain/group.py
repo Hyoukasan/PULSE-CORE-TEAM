@@ -4,7 +4,7 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy import ForeignKey
 
-from ..integrations import db
+from ..integrations.db import db
 
 class Group(db.Model):
 
