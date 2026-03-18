@@ -9,7 +9,7 @@ class Role(db.Model):
 
     __tablename__ = "roles"
 
-    id: so.Mapped[int] = so.mapped_column(sa.Integer(), primary_key=True)
+    id: so.Mapped[int] = so.mapped_column(primary_key=True)
     role: so.Mapped[str] = so.mapped_column(sa.String(16), unique=True, nullable=False)
 
     users: so.Mapped[list["User"]] = so.relationship(back_populates="role")
