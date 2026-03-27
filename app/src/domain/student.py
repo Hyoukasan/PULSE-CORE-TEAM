@@ -14,6 +14,6 @@ class Student(db.Model):
     id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("users.id"), primary_key=True)
     group_id: so.Mapped[int] = so.mapped_column(ForeignKey("groups.id"), nullable=False)
 
-    user: so.Mapped["User"] = so.relationship(back_populates="students")
+    user: so.Mapped["User"] = so.relationship(back_populates="student_profile")
     group: so.Mapped["Group"] = so.relationship(back_populates="students")
 

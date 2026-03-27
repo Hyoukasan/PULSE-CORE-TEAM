@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from sqlalchemy import ForeignKey
 
 from ..integrations.db import db
 

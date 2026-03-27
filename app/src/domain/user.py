@@ -20,6 +20,14 @@ class User(db.Model):
 
     role_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("roles.id"), nullable=False)
     role: so.Mapped["Role"] = so.relationship(back_populates="users")
+    student_profile: so.Mapped[Optional["Student"]] = so.relationship(
+        back_populates="user",
+        uselist=False,
+    )
+    professor_profile: so.Mapped[Optional["Professor"]] = so.relationship(
+        back_populates="user",
+        uselist=False,
+    )
 
     password_hash: so.Mapped[str] = so.mapped_column(sa.String(255), nullable=False)
 

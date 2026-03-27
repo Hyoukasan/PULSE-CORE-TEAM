@@ -9,7 +9,8 @@ class Professor(db.Model):
     __tablename__ = "professors"
 
     id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("users.id"), primary_key=True)
-    group_is: so.Mapped[str] = so.mapped_column(sa.String(16), sa.ForeignKey("groups.id"), nullable=False)
+    group_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("groups.id"), nullable=False)
 
-    group: so.Mapped[list["Group"]] = so.relationship(back_populates="professors")
+    user: so.Mapped["User"] = so.relationship(back_populates="professor_profile")
+    group: so.Mapped["Group"] = so.relationship(back_populates="professors")
 
