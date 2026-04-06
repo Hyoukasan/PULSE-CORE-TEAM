@@ -46,3 +46,19 @@ def validate_group_name(value: str) -> str:
         raise ValueError("group_name length must be <= 8.")
     return name
 
+
+def determine_user_role_from_email(email: str) -> tuple[str, str]:
+    """
+    Определяет роль пользователя по email.
+    Возвращает (user_role для ответа, db_role для БД).
+    """
+    email_lower = email.lower()
+    if "admin" in email_lower:
+        return "admin", "admin"
+    elif "teacher" in email_lower or "prof" in email_lower:
+        return "teacher", "professor"
+    elif "lecture" in email_lower:
+        return "student_lecture", "student"
+    else:
+        return "student", "student"
+

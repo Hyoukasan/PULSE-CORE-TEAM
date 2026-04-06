@@ -7,7 +7,8 @@ from app.src.domain.role import Role
 from app.src.domain.student import Student
 from app.src.domain.user import User
 
-from .schemas import AssignUserToGroupInput, RegisterUserInput, SheetGroupRow
+from .schemas import AssignUserToGroupInput, RegisterUserInput, SheetGroupRow, BotAuthInput
+from .validators import determine_user_role_from_email
 
 
 def register_user(payload: RegisterUserInput) -> User:
@@ -92,4 +93,71 @@ def sync_groups_from_sheet(rows: Iterable[SheetGroupRow]) -> dict:
         "created": created,
         "updated": updated,
     }
+
+
+def bot_authenticate(payload: BotAuthInput) -> str:
+    """
+    Обрабатывает аутентификацию от бота.
+    Возвращает user_role или ошибку.
+    """
+    if payload.action == "registration":
+        # Проверить, существует ли пользователь с таким email
+        existing_user = db.session.execute(
+            db.select(User).where(User.email == payload.mail)
+        ).scalar_one_or_none()
+        if existing_user is not None:
+            return "wrong_mail"
+
+        # Определить роль
+        user_role, db_role = determine_user_role_from_email(payload.mail)
+
+        # Найти роль в БД
+        role = db.session.execute(
+            db.select(Role).where(Role.role == db_role)
+        ).scalar_one_or_none()
+        if role is None:
+            raise ValueError(f"Role '{db_role}' not found. Seed roles first.")
+
+        # Создать пользователя
+        user = User(
+            username=payload.mail,  # Используем email как username
+            email=payload.mail,
+            telegram_id=payload.telegram_id,
+            role_id=role.id,
+        )
+        user.set_password(payload.password)
+        db.session.add(user)
+        db.session.commit()
+        return user_role
+
+    elif payload.action == "enter":
+        # Найти пользователя по email
+        user = db.session.execute(
+            db.select(User).where(User.email == payload.mail)
+        ).scalar_one_or_none()
+        if user is None:
+            return "wrong_mail"
+
+        # Проверить пароль
+        if not user.verify_password(payload.password):
+            return "wrong_password"
+
+        # Обновить telegram_id, если отличается
+        if user.telegram_id != payload.telegram_id:
+            user.telegram_id = payload.telegram_id
+            db.session.commit()
+
+        # Вернуть роль
+        role_name = user.role.role
+        if role_name == "professor":
+            return "teacher"
+        elif role_name == "student":
+            # Для простоты, если lecture — но пока нет, возвращаем student
+            return "student"
+        elif role_name == "admin":
+            return "admin"
+        else:
+            return "student"  # fallback
+
+    raise ValueError("Invalid action.")
 

@@ -44,3 +44,19 @@ class SheetGroupRow:
         self.number = validate_group_number(self.number)
         self.name = validate_group_name(self.name)
 
+
+@dataclass
+class BotAuthInput:
+    action: str
+    telegram_id: int
+    mail: str
+    password: str
+
+    def __post_init__(self) -> None:
+        if self.action not in {"registration", "enter"}:
+            raise ValueError("action must be 'registration' or 'enter'.")
+        if self.telegram_id <= 0:
+            raise ValueError("telegram_id must be > 0.")
+        self.mail = validate_email(self.mail)
+        self.password = validate_password(self.password)
+

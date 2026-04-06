@@ -4,11 +4,13 @@ from app.src.core.schemas import (
     AssignUserToGroupInput,
     RegisterUserInput,
     SheetGroupRow,
+    BotAuthInput,
 )
 from app.src.core.services import (
     assign_user_to_group,
     register_user,
     sync_groups_from_sheet,
+    bot_authenticate,
 )
 
 bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
@@ -75,3 +77,23 @@ def sync_groups_route() -> tuple:
         return jsonify({"error": f"row missing field: {error.args[0]}"}), 400
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
+
+
+@bp.post("/auth/bot")
+def bot_auth_route() -> tuple:
+    data = request.get_json(silent=True) or {}
+    try:
+        payload = BotAuthInput(
+            action=data["action"],
+            telegram_id=int(data["telegram_id"]),
+            mail=data["mail"],
+            password=data["password"],
+        )
+        response = bot_authenticate(payload)
+        return jsonify({"response": response, "role": response}), 200
+    except KeyError as error:
+        return jsonify({"error": f"missing field: {error.args[0]}"}), 400
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except TypeError:
+        return jsonify({"error": "telegram_id must be integer."}), 400
