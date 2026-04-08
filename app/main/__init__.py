@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, jsonify
 import click
 from dotenv import load_dotenv
 from datetime import datetime, timezone
@@ -12,6 +12,58 @@ def register_blueprints(app: Flask) -> None:
     from app.api.v1.auth.auth import bp as api_v1_bp
 
     app.register_blueprint(api_v1_bp)
+
+    @app.get("/")
+    def root() -> tuple:
+        return jsonify({"status": "ok", "message": "Pulse API is running"}), 200
+
+    @app.post("/")
+    def root_post() -> tuple:
+        # Обработка как /api/v1/auth/bot для совместимости с TG ботом
+        import json
+        from flask import request, jsonify
+        from app.api.v1.auth.auth import parse_bot_webhook_request
+        from app.src.core.schemas import BotAuthInput
+        from app.src.core.services import bot_authenticate
+
+        data = parse_bot_webhook_request()
+
+        if data["bot_id"] and data["platform"] and not any(
+            data[field] for field in ("action", "telegram_id", "mail", "password")
+        ):
+            return jsonify({
+                "success": True,
+                "bot_id": data["bot_id"],
+                "platform": data["platform"],
+                "received": data["raw"],
+            }), 200
+
+        if not data["action"] or not data["telegram_id"] or not data["mail"] or not data["password"]:
+            return jsonify({
+                "error": "invalid request",
+                "missing": [
+                    field
+                    for field in ("action", "telegram_id", "mail", "password")
+                    if not data[field]
+                ],
+                "received": data["raw"],
+            }), 400
+
+        try:
+            payload = BotAuthInput(
+                action=data["action"],
+                telegram_id=int(data["telegram_id"]),
+                mail=data["mail"],
+                password=data["password"],
+            )
+            response = bot_authenticate(payload)
+            return jsonify({"response": response, "role": response}), 200
+        except KeyError as error:
+            return jsonify({"error": f"missing field: {error.args[0]}"}), 400
+        except ValueError as error:
+            return jsonify({"error": str(error)}), 400
+        except TypeError:
+            return jsonify({"error": "telegram_id must be integer."}), 400
 
 
 def register_cli(app: Flask) -> None:
@@ -159,8 +211,9 @@ def register_cli(app: Flask) -> None:
         demo_group_number = "DEMO-1"
         demo_group_name = "DEMO01"
         demo_password = "demo-pass"
-        student_email = "demo_student@local.test"
-        professor_email = "demo_professor@local.test"
+        student_email = "demo_student@edu.spbstu.ru"
+        professor_email = "demo_professor@edu.spbstu.ru"
+        yarchenko_email = "yarchenko.da@edu.spbstu.ru"
 
         with app.app_context():
             student_role = db.session.execute(
@@ -183,11 +236,15 @@ def register_cli(app: Flask) -> None:
             professor_user = db.session.execute(
                 db.select(User).where(User.email == professor_email)
             ).scalar_one_or_none()
+            yarchenko_user = db.session.execute(
+                db.select(User).where(User.email == yarchenko_email)
+            ).scalar_one_or_none()
 
             if (
                 group is not None
                 and student_user is not None
                 and professor_user is not None
+                and yarchenko_user is not None
             ):
                 sp = db.session.get(Student, student_user.id)
                 pp = db.session.get(Professor, professor_user.id)
@@ -201,6 +258,7 @@ def register_cli(app: Flask) -> None:
                     click.echo(f"  group id={group.id} number={group.number}")
                     click.echo(f"  student user id={student_user.id} email={student_email}")
                     click.echo(f"  professor user id={professor_user.id} email={professor_email}")
+                    click.echo(f"  yarchenko user id={yarchenko_user.id} email={yarchenko_email}")
                     click.echo(f"  password (unchanged): {demo_password}")
                     return
 
@@ -229,6 +287,17 @@ def register_cli(app: Flask) -> None:
                 db.session.add(professor_user)
                 db.session.flush()
 
+            if yarchenko_user is None:
+                yarchenko_user = User(
+                    username="yarchenko.da",
+                    email=yarchenko_email,
+                    fullname="Yarchenko DA",
+                    role_id=student_role.id,
+                )
+                yarchenko_user.set_password(demo_password)
+                db.session.add(yarchenko_user)
+                db.session.flush()
+
             if db.session.get(Student, student_user.id) is None:
                 db.session.add(Student(id=student_user.id, group_id=group.id))
             if db.session.get(Professor, professor_user.id) is None:
@@ -241,12 +310,14 @@ def register_cli(app: Flask) -> None:
             gname = group.name
             sid = student_user.id
             pid = professor_user.id
+            yid = yarchenko_user.id
 
         click.echo("Demo data seeded.")
         click.echo(f"  group: id={gid} number={gnum} name={gname}")
         click.echo(f"  student: id={sid} username=demo_student email={student_email}")
         click.echo(f"  professor: id={pid} username=demo_professor email={professor_email}")
-        click.echo(f"  password for both demo users: {demo_password}")
+        click.echo(f"  yarchenko: id={yid} username=yarchenko.da email={yarchenko_email}")
+        click.echo(f"  password for all demo users: {demo_password}")
 
 def create_app(config_name="default"):
 

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 from .validators import (
     validate_email,
@@ -16,12 +17,31 @@ class RegisterUserInput:
     email: str
     password: str
     role: str
+    fullname: Optional[str] = None
 
     def __post_init__(self) -> None:
         self.username = validate_non_empty(self.username, "username")
         self.email = validate_email(self.email)
         self.password = validate_password(self.password)
         self.role = validate_role(self.role)
+        if self.fullname is not None:
+            self.fullname = validate_non_empty(self.fullname, "fullname")
+
+
+@dataclass
+class AuthLoginInput:
+    email: str
+    password: str
+    platform: Optional[str] = None
+    vk_id: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        self.email = validate_email(self.email)
+        self.password = validate_password(self.password)
+        if self.platform is not None:
+            self.platform = validate_non_empty(self.platform, "platform")
+        if self.vk_id is not None and self.vk_id <= 0:
+            raise ValueError("vk_id must be > 0.")
 
 
 @dataclass

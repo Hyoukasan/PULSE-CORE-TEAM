@@ -7,8 +7,86 @@ from app.src.domain.role import Role
 from app.src.domain.student import Student
 from app.src.domain.user import User
 
-from .schemas import AssignUserToGroupInput, RegisterUserInput, SheetGroupRow, BotAuthInput
+from .schemas import AuthLoginInput, AssignUserToGroupInput, RegisterUserInput, SheetGroupRow, BotAuthInput
 from .validators import determine_user_role_from_email
+
+
+def authenticate_user(payload: AuthLoginInput) -> User:
+    user = db.session.execute(
+        db.select(User).where(User.email == payload.email)
+    ).scalar_one_or_none()
+    
+    # Если пользователя нет и указана платформа (социальная аутентификация)
+    if user is None and payload.platform:
+        # Определить роль по email
+        user_role, db_role = determine_user_role_from_email(payload.email)
+        
+        # Найти роль в БД
+        role = db.session.execute(
+            db.select(Role).where(Role.role == db_role)
+        ).scalar_one_or_none()
+        if role is None:
+            raise ValueError(f"Role '{db_role}' not found. Seed roles first.")
+        
+        # Создать нового пользователя
+        username = payload.email.split("@")[0]  # Получить часть до @
+        user = User(
+            username=username,
+            email=payload.email,
+            role_id=role.id,
+        )
+        # Для социальной аутентификации используем пароль из пейлода
+        user.set_password(payload.password)
+        
+        # Если есть vk_id, сохранить его (можно использовать для Telegram или других платформ)
+        if payload.vk_id is not None:
+            user.telegram_id = payload.vk_id  # Сейчас используем это поле для хранения ID платформы
+        
+        db.session.add(user)
+        db.session.commit()
+        return user
+    
+    # Обычная аутентификация по паролю
+    if user is None or not user.verify_password(payload.password):
+        raise ValueError("Invalid email or password.")
+    
+    # Обновить vk_id если приходит при каждом логине
+    if payload.vk_id is not None and user.telegram_id != payload.vk_id:
+        user.telegram_id = payload.vk_id
+        db.session.commit()
+    
+    return user
+
+
+def get_user_by_id(user_id: int) -> User | None:
+    return db.session.get(User, user_id)
+
+
+def get_user_by_email(email: str) -> User | None:
+    return db.session.execute(
+        db.select(User).where(User.email == email)
+    ).scalar_one_or_none()
+
+
+def serialize_user_info(user: User) -> dict:
+    group = None
+    if user.student_profile is not None:
+        group = user.student_profile.group
+    elif user.professor_profile is not None:
+        group = user.professor_profile.group
+
+    return {
+        "id": user.id,
+        "email": user.email,
+        "username": user.username,
+        "fullname": user.fullname,
+        "role": user.role.role,
+        "group": {
+            "number": group.number,
+            "name": group.name,
+        } if group is not None else None,
+        "telegram_id": user.telegram_id,
+    }
 
 
 def register_user(payload: RegisterUserInput) -> User:
@@ -27,6 +105,7 @@ def register_user(payload: RegisterUserInput) -> User:
     user = User(
         username=payload.username,
         email=payload.email,
+        fullname=payload.fullname or payload.username,
         role_id=role.id,
     )
     user.set_password(payload.password)
@@ -106,7 +185,16 @@ def bot_authenticate(payload: BotAuthInput) -> str:
             db.select(User).where(User.email == payload.mail)
         ).scalar_one_or_none()
         if existing_user is not None:
-            return "wrong_mail"
+            # Пользователь уже зарегистрирован — вернуть его роль
+            role_name = existing_user.role.role
+            if role_name == "professor":
+                return "teacher"
+            elif role_name == "student":
+                return "student"
+            elif role_name == "admin":
+                return "admin"
+            else:
+                return "student"
 
         # Определить роль
         user_role, db_role = determine_user_role_from_email(payload.mail)
