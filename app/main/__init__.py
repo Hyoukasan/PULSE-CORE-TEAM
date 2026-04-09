@@ -336,6 +336,7 @@ def create_app(config_name="default"):
     from app.src.domain.professor import Professor
     from app.src.domain.student import Student
     from app.src.domain.group import Group
+    from app.src.domain.message import Message
 
     return app
 

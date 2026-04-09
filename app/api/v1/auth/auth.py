@@ -5,7 +5,10 @@ from flask import Blueprint, current_app, jsonify, request
 from app.src.core.schemas import (
     AssignUserToGroupInput,
     AuthLoginInput,
+    MessagePayload,
+    MessageSenderInput,
     RegisterUserInput,
+    SendMessageInput,
     SheetGroupRow,
     BotAuthInput,
 )
@@ -15,6 +18,7 @@ from app.src.core.services import (
     get_user_by_email,
     get_user_by_id,
     register_user,
+    send_message,
     serialize_user_info,
     sync_groups_from_sheet,
     bot_authenticate,
@@ -58,6 +62,7 @@ def register_user_route() -> tuple:
 
 
 @bp.post("/auth/login")
+@bp.post("/auth/enter")
 def login_route() -> tuple:
     data = request.get_json(silent=True) or {}
     try:
@@ -75,6 +80,66 @@ def login_route() -> tuple:
         return jsonify({"error": str(error)}), 400
     except TypeError:
         return jsonify({"error": "vk_id must be integer."}), 400
+
+
+@bp.post("/messages/send")
+def send_message_route() -> tuple:
+    data = request.get_json(silent=True) or {}
+    try:
+        sender_data = data["from"]
+        message_data = data["message"]
+        to_data = data.get("to") or {}
+        payload = SendMessageInput(
+            sender=MessageSenderInput(
+                user_id=sender_data.get("user_id"),
+                email=sender_data.get("email"),
+                fullname=sender_data.get("fullname"),
+                group=sender_data.get("group"),
+                role=sender_data["role"],
+                platform=sender_data.get("platform"),
+                telegram_id=(
+                    int(sender_data["telegram_id"])
+                    if sender_data.get("telegram_id") is not None
+                    else None
+                ),
+            ),
+            message=MessagePayload(
+                type=message_data.get("type"),
+                text=message_data["text"],
+                timestamp=message_data.get("timestamp"),
+            ),
+            to_user_id=(
+                int(data["to_user_id"])
+                if data.get("to_user_id") is not None
+                else (
+                    int(to_data["user_id"])
+                    if to_data.get("user_id") is not None
+                    else None
+                )
+            ),
+            to_telegram_id=(
+                int(data["to_telegram_id"])
+                if data.get("to_telegram_id") is not None
+                else (
+                    int(to_data["telegram_id"])
+                    if to_data.get("telegram_id") is not None
+                    else None
+                )
+            ),
+        )
+        message = send_message(payload)
+        return jsonify({
+            "success": True,
+            "message_id": message.id,
+            "status": message.status,
+            "created_at": message.created_at.isoformat(),
+        }), 200
+    except KeyError as error:
+        return jsonify({"error": f"missing field: {error.args[0]}"}), 400
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except TypeError:
+        return jsonify({"error": "telegram_id and user_id must be integers."}), 400
 
 
 @bp.post("/auth/verify")

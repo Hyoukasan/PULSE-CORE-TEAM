@@ -1,7 +1,9 @@
 import re
 
 
-EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+EMAIL_RE = re.compile(
+    r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
+)
 
 
 def validate_non_empty(value: str, field_name: str) -> str:
