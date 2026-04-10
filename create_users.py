@@ -20,7 +20,7 @@ def ensure_group(number: str, name: str) -> Group:
     return group
 
 def ensure_roles() -> None:
-    base_roles = ["admin", "student", "professor"]
+    base_roles = ["admin", "student", "student_lecture", "practitioner", "listener", "professor"]
     created = 0
     for role_name in base_roles:
         exists = db.session.execute(db.select(Role).where(Role.role == role_name)).scalar_one_or_none()
@@ -61,13 +61,26 @@ with app.app_context():
             print(f'✓ Создан: {email} (роль: {role})')
 
     student_role = db.session.execute(db.select(Role).where(Role.role == 'student')).scalar_one_or_none()
+    student_lecture_role = db.session.execute(db.select(Role).where(Role.role == 'student_lecture')).scalar_one_or_none()
+    practitioner_role = db.session.execute(db.select(Role).where(Role.role == 'practitioner')).scalar_one_or_none()
+    listener_role = db.session.execute(db.select(Role).where(Role.role == 'listener')).scalar_one_or_none()
     professor_role = db.session.execute(db.select(Role).where(Role.role == 'professor')).scalar_one_or_none()
 
     if student_role is None or professor_role is None:
         raise RuntimeError('Роли student/professor не найдены. Запустите seed-roles.')
 
+    role_ids = [professor_role.id]
+    if student_role is not None:
+        role_ids.append(student_role.id)
+    if student_lecture_role is not None:
+        role_ids.append(student_lecture_role.id)
+    if practitioner_role is not None:
+        role_ids.append(practitioner_role.id)
+    if listener_role is not None:
+        role_ids.append(listener_role.id)
+
     users_to_assign = db.session.execute(
-        db.select(User).where(User.role_id.in_([student_role.id, professor_role.id]))
+        db.select(User).where(User.role_id.in_(role_ids))
     ).scalars().all()
 
     assigned_students = 0

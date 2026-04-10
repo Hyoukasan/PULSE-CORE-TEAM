@@ -1,305 +1,26 @@
-from flask import Flask, jsonify, render_template_string
-import click
-from dotenv import load_dotenv
 from datetime import datetime, timezone
 
+import click
+from flask import Flask, jsonify, render_template_string
+from dotenv import load_dotenv
+from swagger_gen.swagger import Swagger
+from swagger_gen.lib.wrappers import swagger_metadata
+
+import app.src.domain
 from .config import config
 from app.src.integrations.db import db
 from app.src.integrations.redis_client import init_redis
 
 
-OPENAPI_SPEC = {
-    "openapi": "3.0.0",
-    "info": {
-        "title": "Pulse API",
-        "version": "1.0.0",
-        "description": "Pulse API documentation",
-    },
-    "servers": [{"url": "/"}],
-    "paths": {
-        "/api/v1/health": {
-            "get": {
-                "summary": "Health check",
-                "responses": {"200": {"description": "OK"}},
-            }
-        },
-        "/api/v1/auth/bot": {
-            "post": {
-                "summary": "Authenticate bot user",
-                "requestBody": {
-                    "required": True,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "action": {"type": "string"},
-                                    "telegram_id": {"type": "integer"},
-                                    "mail": {"type": "string"},
-                                    "password": {"type": "string"},
-                                    "fullname": {"type": "string"},
-                                },
-                                "required": ["action", "telegram_id", "mail", "password"],
-                            }
-                        }
-                    }
-                },
-                "responses": {"200": {"description": "Authenticated"}},
-            }
-        },
-        "/api/v1/auth/login": {
-            "post": {
-                "summary": "User login",
-                "requestBody": {
-                    "required": True,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "email": {"type": "string"},
-                                    "password": {"type": "string"},
-                                },
-                                "required": ["email", "password"],
-                            }
-                        }
-                    }
-                },
-                "responses": {"200": {"description": "OK"}},
-            }
-        },
-        "/api/v1/auth/enter": {
-            "post": {
-                "summary": "User enter",
-                "requestBody": {
-                    "required": True,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "email": {"type": "string"},
-                                    "password": {"type": "string"},
-                                },
-                                "required": ["email", "password"],
-                            }
-                        }
-                    }
-                },
-                "responses": {"200": {"description": "OK"}},
-            }
-        },
-        "/api/v1/users/register": {
-            "post": {
-                "summary": "Register user",
-                "requestBody": {
-                    "required": True,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "username": {"type": "string"},
-                                    "email": {"type": "string"},
-                                    "password": {"type": "string"},
-                                    "role": {"type": "string"},
-                                    "fullname": {"type": "string"},
-                                },
-                                "required": ["username", "email", "password", "role"],
-                            }
-                        }
-                    }
-                },
-                "responses": {"201": {"description": "Created"}},
-            }
-        },
-        "/api/v1/messages/send": {
-            "post": {
-                "summary": "Send message",
-                "requestBody": {
-                    "required": True,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "sender": {"type": "object"},
-                                    "message": {"type": "object"},
-                                    "to_user_id": {"type": "integer"},
-                                    "to_telegram_id": {"type": "integer"},
-                                },
-                                "required": ["sender", "message"],
-                            }
-                        }
-                    }
-                },
-                "responses": {"200": {"description": "Message sent"}},
-            }
-        },
-        "/api/v1/attendance/excuse": {
-            "post": {
-                "summary": "Submit attendance excuse",
-                "requestBody": {
-                    "required": True,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "email": {"type": "string"},
-                                    "reason": {"type": "string"},
-                                    "file_url": {"type": "string"},
-                                    "timestamp": {"type": "string"},
-                                },
-                                "required": ["email", "reason"],
-                            }
-                        }
-                    }
-                },
-                "responses": {"201": {"description": "Created"}},
-            }
-        },
-        "/api/v1/attendance/pass": {
-            "post": {
-                "summary": "Check attendance pass",
-                "requestBody": {
-                    "required": True,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "pass_id": {"type": "string"},
-                                },
-                                "required": ["pass_id"],
-                            }
-                        }
-                    }
-                },
-                "responses": {"200": {"description": "Checked"}},
-            }
-        },
-    },
-}
-
-SWAGGER_UI_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Pulse API Swagger UI</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.18.2/swagger-ui.css" />
-  <style>
-    body { margin: 0; padding: 0; }
-  </style>
-</head>
-<body>
-  <div id="swagger-ui"></div>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.18.2/swagger-ui-bundle.min.js"></script>
-  <script>
-    window.onload = function() {
-      SwaggerUIBundle({
-        url: "/openapi.json",
-        dom_id: "#swagger-ui",
-        presets: [
-          SwaggerUIBundle.presets.apis,
-          SwaggerUIBundle.SwaggerUIStandalonePreset,
-        ],
-        layout: "BaseLayout",
-      });
-    };
-  </script>
-</body>
-</html>"""
-
-
 def register_blueprints(app: Flask) -> None:
-    from app.api.v1.auth.auth import bp as api_v1_bp
+    from app.api import v1    
 
-    app.register_blueprint(api_v1_bp)
-
-    @app.get("/openapi.json")
-    def openapi_spec() -> tuple:
-        return jsonify(OPENAPI_SPEC), 200
-
-    @app.get("/swagger")
-    @app.get("/docs")
-    def swagger_ui() -> tuple:
-        return render_template_string(SWAGGER_UI_HTML), 200
-
-    @app.get("/")
-    def root() -> tuple:
-        return jsonify({"status": "ok", "message": "Pulse API is running"}), 200
-
-    @app.post("/")
-    def root_post() -> tuple:
-        # Обработка как /api/v1/auth/bot для совместимости с TG ботом
-        import json
-        from flask import request, jsonify
-        from app.api.v1.auth.auth import parse_bot_webhook_request
-        from app.src.core.schemas import BotAuthInput
-        from app.src.core.services import bot_authenticate
-
-        data = parse_bot_webhook_request()
-
-        if data["bot_id"] and data["platform"] and not any(
-            data[field] for field in ("action", "telegram_id", "mail", "password")
-        ):
-            return jsonify({
-                "success": True,
-                "bot_id": data["bot_id"],
-                "platform": data["platform"],
-            }), 200
-
-        if not data["action"] or not data["telegram_id"] or not data["mail"] or not data["password"]:
-            return jsonify({
-                "error": "invalid request",
-                "missing": [
-                    field
-                    for field in ("action", "telegram_id", "mail", "password")
-                    if not data[field]
-                ],
-            }), 400
-
-        try:
-            payload = BotAuthInput(
-                action=data["action"],
-                telegram_id=int(data["telegram_id"]),
-                mail=data["mail"],
-                password=data["password"],
-            )
-            response = bot_authenticate(payload)
-            return jsonify({"response": response, "role": response}), 200
-        except KeyError as error:
-            return jsonify({"error": f"missing field: {error.args[0]}"}), 400
-        except ValueError as error:
-            return jsonify({"error": str(error)}), 400
-        except TypeError:
-            return jsonify({"error": "telegram_id must be integer."}), 400
-
-    @app.post("/api/attendance/excuse")
-    def attendance_excuse_alias() -> tuple:
-        from flask import request, jsonify
-        from app.src.core.schemas import AttendanceExcuseInput
-        from app.src.core.services import submit_attendance_excuse
-
-        data = request.get_json(silent=True) or {}
-        try:
-            payload = AttendanceExcuseInput(
-                email=data["email"],
-                reason=data["reason"],
-                file_url=data.get("file_url"),
-                timestamp=data.get("timestamp"),
-            )
-            excuse = submit_attendance_excuse(payload)
-            return jsonify({
-                "success": True,
-                "excuse_id": excuse.id,
-                "created_at": excuse.created_at.isoformat(),
-            }), 201
-        except KeyError as error:
-            return jsonify({"error": f"missing field: {error.args[0]}"}), 400
-        except ValueError as error:
-            return jsonify({"error": str(error)}), 400
+    app.register_blueprint(v1.health.bp)
+    app.register_blueprint(v1.auth.bp)
+    app.register_blueprint(v1.attendance.bp)
+    app.register_blueprint(v1.groups.bp)
+    app.register_blueprint(v1.messages.bp)
+    app.register_blueprint(v1.users.bp)
 
 
 def register_cli(app: Flask) -> None:
@@ -348,7 +69,14 @@ def register_cli(app: Flask) -> None:
         """Insert base roles if they do not exist."""
         from app.src.domain.role import Role
 
-        base_roles = ("admin", "student", "professor")
+        base_roles = (
+            "admin",
+            "student",
+            "student_lecture",
+            "practitioner",
+            "listener",
+            "professor",
+        )
         created_count = 0
 
         with app.app_context():
@@ -564,7 +292,6 @@ def register_cli(app: Flask) -> None:
         click.echo(f"  password for all demo users: {demo_password}")
 
 def create_app(config_name="default"):
-
     load_dotenv()
 
     app = Flask(__name__)
@@ -575,12 +302,8 @@ def create_app(config_name="default"):
     register_blueprints(app)
     register_cli(app)
 
-    from app.src.domain.user import User
-    from app.src.domain.role import Role
-    from app.src.domain.professor import Professor
-    from app.src.domain.student import Student
-    from app.src.domain.group import Group
-    from app.src.domain.message import Message
+    swagger = Swagger(app=app, title='PulseCore')
+    swagger.configure()
 
     return app
 

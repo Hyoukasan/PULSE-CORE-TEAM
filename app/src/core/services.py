@@ -39,11 +39,9 @@ def _generate_unique_username(email: str) -> str:
 def _normalize_user_role(role_name: str) -> str:
     if role_name == "professor":
         return "teacher"
-    if role_name == "student":
-        return "student"
-    if role_name == "admin":
-        return "admin"
-    return "student"
+    if role_name in {"student", "student_lecture", "practitioner", "listener", "admin"}:
+        return role_name
+    return role_name
 
 
 def authenticate_user(payload: AuthLoginInput) -> User:
@@ -135,7 +133,7 @@ def get_message_recipient(
     to_user_id: int | None = None,
     to_telegram_id: int | None = None,
 ) -> User:
-    if sender.role.role == "student":
+    if sender.role.role in {"student", "student_lecture", "practitioner", "listener"}:
         profile = db.session.get(Student, sender.id)
         if profile is None or profile.group_id is None:
             raise ValueError("Student is not assigned to a group.")
@@ -158,7 +156,7 @@ def get_message_recipient(
 
         if recipient is None:
             raise ValueError("Student recipient not found.")
-        if recipient.role.role != "student":
+        if recipient.role.role not in {"student", "student_lecture", "practitioner", "listener"}:
             raise ValueError("Recipient must be a student.")
         return recipient
 
@@ -249,7 +247,7 @@ def assign_user_to_group(payload: AssignUserToGroupInput) -> Group:
     if group is None:
         raise ValueError("Group not found.")
 
-    if user.role.role == "student":
+    if user.role.role in {"student", "student_lecture", "practitioner", "listener"}:
         profile = db.session.get(Student, user.id)
         if profile is None:
             profile = Student(id=user.id, group_id=group.id)
@@ -264,7 +262,7 @@ def assign_user_to_group(payload: AssignUserToGroupInput) -> Group:
         else:
             profile.group_id = group.id
     else:
-        raise ValueError("Only users with roles student/professor can be assigned to group.")
+        raise ValueError("Only users with student-like roles or professor can be assigned to group.")
 
     db.session.commit()
     return group

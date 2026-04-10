@@ -22,7 +22,7 @@ def validate_email(value: str) -> str:
 
 def validate_role(value: str) -> str:
     role = validate_non_empty(value, "role").lower()
-    allowed = {"admin", "student", "professor"}
+    allowed = {"admin", "student", "student_lecture", "practitioner", "listener", "professor"}
     if role not in allowed:
         raise ValueError(f"role must be one of: {', '.join(sorted(allowed))}.")
     return role
@@ -59,8 +59,12 @@ def determine_user_role_from_email(email: str) -> tuple[str, str]:
         return "admin", "admin"
     elif "teacher" in email_lower or "prof" in email_lower:
         return "teacher", "professor"
+    elif "listener" in email_lower or "audit" in email_lower:
+        return "listener", "listener"
+    elif "praktik" in email_lower or "practice" in email_lower:
+        return "practitioner", "practitioner"
     elif "lecture" in email_lower:
-        return "student_lecture", "student"
+        return "student_lecture", "student_lecture"
     else:
-        return "student", "student"
+        return "practitioner", "practitioner"
 

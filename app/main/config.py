@@ -5,6 +5,7 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
 DEFAULT_DB_PATH = os.path.join(INSTANCE_DIR, "pulse_project.db")
 
+os.makedirs(INSTANCE_DIR, exist_ok=True)
 
 class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY")
