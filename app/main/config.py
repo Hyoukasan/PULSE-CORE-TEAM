@@ -12,6 +12,12 @@ class Config:
     SQLALCHEMY_DATABASE_URI = os.environ.get(
         "DATABASE_URL", f"sqlite:///{DEFAULT_DB_PATH}"
     )
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "connect_args": {
+            "timeout": 30,
+            "check_same_thread": False,
+        }
+    }
     SHEETS_SYNC_API_KEY = os.environ.get("SHEETS_SYNC_API_KEY")
     REDIS_HOST = os.getenv("REDIS_HOST")
     REDIS_PORT = os.environ.get("REDIS_PORT", 6379)

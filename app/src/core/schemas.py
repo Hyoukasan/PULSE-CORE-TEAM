@@ -116,11 +116,36 @@ class SheetGroupRow:
 
 
 @dataclass
+class AttendanceExcuseInput:
+    email: str
+    reason: str
+    file_url: Optional[str] = None
+    timestamp: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        self.email = validate_email(self.email)
+        self.reason = validate_non_empty(self.reason, "reason")
+        if self.file_url is not None:
+            self.file_url = validate_non_empty(self.file_url, "file_url")
+        if self.timestamp is not None:
+            self.timestamp = validate_non_empty(self.timestamp, "timestamp")
+
+
+@dataclass
+class AttendancePassInput:
+    pass_id: str
+
+    def __post_init__(self) -> None:
+        self.pass_id = validate_non_empty(self.pass_id, "pass_id")
+
+
+@dataclass
 class BotAuthInput:
     action: str
     telegram_id: int
     mail: str
     password: str
+    fullname: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.action not in {"registration", "enter"}:
@@ -129,4 +154,6 @@ class BotAuthInput:
             raise ValueError("telegram_id must be > 0.")
         self.mail = validate_email(self.mail)
         self.password = validate_password(self.password)
+        if self.fullname is not None:
+            self.fullname = validate_non_empty(self.fullname, "fullname")
 

@@ -19,12 +19,29 @@ def ensure_group(number: str, name: str) -> Group:
         print(f'✓ Группа уже существует: {number} / {name}')
     return group
 
+def ensure_roles() -> None:
+    base_roles = ["admin", "student", "professor"]
+    created = 0
+    for role_name in base_roles:
+        exists = db.session.execute(db.select(Role).where(Role.role == role_name)).scalar_one_or_none()
+        if exists is None:
+            db.session.add(Role(role=role_name))
+            created += 1
+    if created > 0:
+        db.session.commit()
+        print(f'✓ Создано ролей: {created}')
+    else:
+        print('✓ Роли уже существуют: admin, student, professor')
+
+
 with app.app_context():
+    ensure_roles()
     group = ensure_group('TEST_GROUP', 'TESTGRP1')
 
     users = [
         ('golomazov.rs@edu.spbstu.ru', 'golomazov.rs', 'Golomazov RS', 'admin'),
         ('kolesnikova.sm@edu.spbstu.ru', 'kolesnikova.sm', 'Kolesnikova SM', 'professor'),
+        ('karpov.ds@edu.spbstu.ru', 'Karpov.ds', 'Karpov DS', 'professor'),
         ('avtodeevivan@gmail.com', 'avtodeevivan', 'Avtodeev Ivan', 'student'),
     ]
 

@@ -1,6 +1,9 @@
+from datetime import datetime
 from typing import Iterable
 
 from app.src.integrations.db import db
+from app.src.domain.attendance_excuse import AttendanceExcuse
+from app.src.domain.attendance_record import AttendanceRecord
 from app.src.domain.group import Group
 from app.src.domain.message import Message
 from app.src.domain.professor import Professor
@@ -11,6 +14,8 @@ from app.src.domain.user import User
 from .schemas import (
     AuthLoginInput,
     AssignUserToGroupInput,
+    AttendanceExcuseInput,
+    AttendancePassInput,
     MessagePayload,
     MessageSenderInput,
     RegisterUserInput,
@@ -29,6 +34,16 @@ def _generate_unique_username(email: str) -> str:
         username = f"{base_username}_{suffix}"
         suffix += 1
     return username
+
+
+def _normalize_user_role(role_name: str) -> str:
+    if role_name == "professor":
+        return "teacher"
+    if role_name == "student":
+        return "student"
+    if role_name == "admin":
+        return "admin"
+    return "student"
 
 
 def authenticate_user(payload: AuthLoginInput) -> User:
@@ -282,78 +297,108 @@ def sync_groups_from_sheet(rows: Iterable[SheetGroupRow]) -> dict:
     }
 
 
+def submit_attendance_excuse(payload: AttendanceExcuseInput) -> AttendanceExcuse:
+    timestamp_value = None
+    if payload.timestamp is not None:
+        parsed_timestamp = payload.timestamp
+        if parsed_timestamp.endswith("Z"):
+            parsed_timestamp = parsed_timestamp.replace("Z", "+00:00")
+        try:
+            timestamp_value = datetime.fromisoformat(parsed_timestamp)
+        except ValueError:
+            raise ValueError("timestamp must be a valid ISO 8601 string.")
+
+    excuse = AttendanceExcuse(
+        email=payload.email,
+        reason=payload.reason,
+        file_url=payload.file_url,
+        timestamp=timestamp_value,
+    )
+    db.session.add(excuse)
+    db.session.commit()
+    return excuse
+
+
+def check_attendance_pass(payload: AttendancePassInput) -> dict:
+    student = db.session.execute(
+        db.select(Student).where(Student.pass_id == payload.pass_id)
+    ).scalar_one_or_none()
+
+    if student is None:
+        return {"status": "bad_pass"}
+
+    attendance = AttendanceRecord(student_id=student.id)
+    db.session.add(attendance)
+    student.missed_passes += 1
+    db.session.commit()
+
+    attendance_list = [record.timestamp.isoformat() for record in student.attendance_records]
+
+    return {
+        "status": "normal_pass",
+        "student_id": student.id,
+        "email": student.user.email,
+        "fullname": student.user.fullname,
+        "missed_passes": student.missed_passes,
+        "attendance": attendance_list,
+    }
+
+
 def bot_authenticate(payload: BotAuthInput) -> str:
     """
     Обрабатывает аутентификацию от бота.
     Возвращает user_role или ошибку.
     """
     if payload.action == "registration":
-        # Проверить, существует ли пользователь с таким email
-        existing_user = db.session.execute(
+        user = db.session.execute(
             db.select(User).where(User.email == payload.mail)
         ).scalar_one_or_none()
-        if existing_user is not None:
-            # Пользователь уже зарегистрирован — вернуть его роль
-            role_name = existing_user.role.role
-            if role_name == "professor":
-                return "teacher"
-            elif role_name == "student":
-                return "student"
-            elif role_name == "admin":
-                return "admin"
-            else:
-                return "student"
 
-        # Определить роль
+        if user is not None:
+            return "user_exist"
+
+        if payload.telegram_id is not None:
+            existing_user_by_telegram = get_user_by_telegram_id(payload.telegram_id)
+            if existing_user_by_telegram is not None:
+                return "user_exist"
+
         user_role, db_role = determine_user_role_from_email(payload.mail)
-
-        # Найти роль в БД
         role = db.session.execute(
             db.select(Role).where(Role.role == db_role)
         ).scalar_one_or_none()
         if role is None:
             raise ValueError(f"Role '{db_role}' not found. Seed roles first.")
 
-        # Создать пользователя
         user = User(
-            username=payload.mail,  # Используем email как username
+            username=payload.mail,
             email=payload.mail,
+            fullname=payload.fullname,
             telegram_id=payload.telegram_id,
             role_id=role.id,
         )
         user.set_password(payload.password)
         db.session.add(user)
         db.session.commit()
-        return user_role
+        return _normalize_user_role(user.role.role)
 
     elif payload.action == "enter":
-        # Найти пользователя по email
         user = db.session.execute(
             db.select(User).where(User.email == payload.mail)
         ).scalar_one_or_none()
         if user is None:
-            return "wrong_mail"
+            return "there is not such user"
 
-        # Проверить пароль
         if not user.verify_password(payload.password):
             return "wrong_password"
 
-        # Обновить telegram_id, если отличается
-        if user.telegram_id != payload.telegram_id:
+        if payload.telegram_id is not None and user.telegram_id is not None and user.telegram_id != payload.telegram_id:
+            return "user_exist"
+
+        if payload.telegram_id is not None and user.telegram_id is None:
             user.telegram_id = payload.telegram_id
             db.session.commit()
 
-        # Вернуть роль
-        role_name = user.role.role
-        if role_name == "professor":
-            return "teacher"
-        elif role_name == "student":
-            # Для простоты, если lecture — но пока нет, возвращаем student
-            return "student"
-        elif role_name == "admin":
-            return "admin"
-        else:
-            return "student"  # fallback
+        return _normalize_user_role(user.role.role)
 
     raise ValueError("Invalid action.")
 

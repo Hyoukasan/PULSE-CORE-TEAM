@@ -5,6 +5,8 @@ from flask import Blueprint, current_app, jsonify, request
 from app.src.core.schemas import (
     AssignUserToGroupInput,
     AuthLoginInput,
+    AttendanceExcuseInput,
+    AttendancePassInput,
     MessagePayload,
     MessageSenderInput,
     RegisterUserInput,
@@ -15,11 +17,13 @@ from app.src.core.schemas import (
 from app.src.core.services import (
     assign_user_to_group,
     authenticate_user,
+    check_attendance_pass,
     get_user_by_email,
     get_user_by_id,
     register_user,
     send_message,
     serialize_user_info,
+    submit_attendance_excuse,
     sync_groups_from_sheet,
     bot_authenticate,
 )
@@ -162,6 +166,43 @@ def verify_user_route() -> tuple:
     return jsonify({"role": role_name}), 200
 
 
+@bp.post("/attendance/excuse")
+def submit_attendance_excuse_route() -> tuple:
+    data = request.get_json(silent=True) or {}
+    try:
+        payload = AttendanceExcuseInput(
+            email=data["email"],
+            reason=data["reason"],
+            file_url=data.get("file_url"),
+            timestamp=data.get("timestamp"),
+        )
+        excuse = submit_attendance_excuse(payload)
+        return jsonify({
+            "success": True,
+            "excuse_id": excuse.id,
+            "created_at": excuse.created_at.isoformat(),
+        }), 201
+    except KeyError as error:
+        return jsonify({"error": f"missing field: {error.args[0]}"}), 400
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+
+
+@bp.post("/attendance/pass")
+def attendance_pass_route() -> tuple:
+    data = request.get_json(silent=True) or {}
+    try:
+        payload = AttendancePassInput(pass_id=data["pass_id"])
+        result = check_attendance_pass(payload)
+        if result["status"] == "normal_pass":
+            return jsonify({"message": "visit confirmed"}), 200
+        return jsonify(result), 200
+    except KeyError as error:
+        return jsonify({"error": f"missing field: {error.args[0]}"}), 400
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+
+
 @bp.get("/users/<int:user_id>")
 def get_user_route(user_id: int) -> tuple:
     user = get_user_by_id(user_id)
@@ -227,6 +268,7 @@ def parse_bot_webhook_request() -> dict:
         "telegram_id": data.get("telegram_id") or data.get("telegramId") or data.get("telegramid"),
         "mail": data.get("mail") or data.get("email"),
         "password": data.get("password"),
+        "fullname": data.get("fullname"),
         "bot_id": data.get("bot_id") or data.get("botId") or data.get("botid"),
         "platform": data.get("platform"),
         "raw": data,
@@ -249,15 +291,16 @@ def bot_auth_route() -> tuple:
         }), 200
 
     if not data["action"] or not data["telegram_id"] or not data["mail"] or not data["password"]:
+        missing_fields = [
+            field
+            for field in ("action", "telegram_id", "mail", "password")
+            if not data[field]
+        ]
         return jsonify({
             "error": "invalid request",
-            "missing": [
-                field
-                for field in ("action", "telegram_id", "mail", "password")
-                if not data[field]
-            ],
-            "received": data["raw"],
-        }), 400
+            "missing": missing_fields,
+            "missing_field": missing_fields[0] if len(missing_fields) == 1 else None,
+        }), 200
 
     try:
         payload = BotAuthInput(
@@ -265,15 +308,21 @@ def bot_auth_route() -> tuple:
             telegram_id=int(data["telegram_id"]),
             mail=data["mail"],
             password=data["password"],
+            fullname=data.get("fullname"),
         )
         response = bot_authenticate(payload)
         return jsonify({"role": response}), 200
     except KeyError as error:
-        return jsonify({"error": f"missing field: {error.args[0]}"}), 400
+        return jsonify({"error": f"missing field: {error.args[0]}"}), 200
     except ValueError as error:
-        return jsonify({"error": str(error)}), 400
+        message = str(error)
+        if "email" in message:
+            return jsonify({"error": "wrong_mail"}), 200
+        if "password" in message:
+            return jsonify({"error": "wrong_password"}), 200
+        return jsonify({"error": message}), 200
     except TypeError:
-        return jsonify({"error": "telegram_id must be integer."}), 400
+        return jsonify({"error": "telegram_id must be integer."}), 200
 
 
 # @bp.post("/auth/bot")
