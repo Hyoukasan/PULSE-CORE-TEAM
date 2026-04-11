@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .validators import (
+    validate_bot_email,
     validate_email,
     validate_group_name,
     validate_group_number,
@@ -152,7 +153,7 @@ class BotAuthInput:
             raise ValueError("action must be 'registration' or 'enter'.")
         if self.telegram_id <= 0:
             raise ValueError("telegram_id must be > 0.")
-        self.mail = validate_email(self.mail)
+        self.mail = validate_bot_email(self.mail)
         self.password = validate_password(self.password)
         if self.fullname is not None:
             self.fullname = validate_non_empty(self.fullname, "fullname")

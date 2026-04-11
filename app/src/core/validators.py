@@ -5,6 +5,10 @@ EMAIL_RE = re.compile(
     r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
 )
 
+BOT_EMAIL_RE = re.compile(
+    r"^[a-z]+\.[a-z]{2}@edu\.spbstu\.ru$"
+)
+
 
 def validate_non_empty(value: str, field_name: str) -> str:
     normalized = value.strip()
@@ -16,6 +20,13 @@ def validate_non_empty(value: str, field_name: str) -> str:
 def validate_email(value: str) -> str:
     email = validate_non_empty(value, "email").lower()
     if not EMAIL_RE.match(email):
+        raise ValueError("email has invalid format.")
+    return email
+
+
+def validate_bot_email(value: str) -> str:
+    email = validate_non_empty(value, "email").lower()
+    if not BOT_EMAIL_RE.match(email):
         raise ValueError("email has invalid format.")
     return email
 

@@ -360,12 +360,11 @@ def bot_authenticate(payload: BotAuthInput) -> str:
             if existing_user_by_telegram is not None:
                 return "user_exist"
 
-        user_role, db_role = determine_user_role_from_email(payload.mail)
         role = db.session.execute(
-            db.select(Role).where(Role.role == db_role)
+            db.select(Role).where(Role.role == "listener")
         ).scalar_one_or_none()
         if role is None:
-            raise ValueError(f"Role '{db_role}' not found. Seed roles first.")
+            raise ValueError("Role 'listener' not found. Seed roles first.")
 
         user = User(
             username=payload.mail,
