@@ -26,10 +26,11 @@ def register_blueprints(app: Flask) -> None:
 def register_cli(app: Flask) -> None:
     @app.cli.command("db-init")
     def db_init() -> None:
-        """Create all database tables (dev-only)."""
+        """Create all database tables and seed base roles (dev-only)."""
         with app.app_context():
             db.create_all()
-        click.echo("DB initialized (create_all).")
+            seed_roles()
+        click.echo("DB initialized (create_all) and seeded base roles.")
 
     @app.cli.command("db-drop")
     def db_drop() -> None:
@@ -49,7 +50,7 @@ def register_cli(app: Flask) -> None:
 
     @app.cli.command("db-reset")
     def db_reset() -> None:
-        """Drop and recreate all tables (DANGEROUS)."""
+        """Drop and recreate all tables, then seed base roles (DANGEROUS)."""
         click.confirm(
             "This will DROP and RECREATE ALL tables. Are you sure?",
             default=False,
@@ -62,7 +63,8 @@ def register_cli(app: Flask) -> None:
                 engine.dispose()
             db.drop_all()
             db.create_all()
-        click.echo("DB reset (drop_all + create_all).")
+            seed_roles()
+        click.echo("DB reset (drop_all + create_all) and seeded base roles.")
 
     @app.cli.command("seed-roles")
     def seed_roles() -> None:
