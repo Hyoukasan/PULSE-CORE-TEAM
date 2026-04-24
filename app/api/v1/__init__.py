@@ -4,3 +4,4 @@ from . import attendance
 from . import groups
 from . import messages
 from . import users
+from . import arduino

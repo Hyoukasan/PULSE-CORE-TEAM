@@ -19,6 +19,7 @@ class User(db.Model):
     email: so.Mapped[str] = so.mapped_column(sa.String(120), nullable=False, unique=True)
     fullname: so.Mapped[Optional[str]] = so.mapped_column(sa.String(120), nullable=True)
     telegram_id: so.Mapped[Optional[int]] = so.mapped_column(sa.Integer, unique=True, nullable=True)
+    pass_key: so.Mapped[Optional[str]] = so.mapped_column(sa.String(128), unique=True, nullable=True)
 
     role_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("roles.id"), nullable=False)
     role: so.Mapped["Role"] = so.relationship(back_populates="users")

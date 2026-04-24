@@ -23,6 +23,7 @@ class Config:
     REDIS_HOST = os.getenv("REDIS_HOST")
     REDIS_PORT = os.environ.get("REDIS_PORT", 6379)
     REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
+    ARDUINO_PUBLIC_KEY_PATH = os.environ.get("ARDUINO_PUBLIC_KEY_PATH", os.path.join(BASE_DIR, "pub.pem"))
 
 class DevelopmentConfig(Config):
     DEBUG = True

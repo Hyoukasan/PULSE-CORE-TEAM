@@ -21,6 +21,7 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(v1.groups.bp)
     app.register_blueprint(v1.messages.bp)
     app.register_blueprint(v1.users.bp)
+    app.register_blueprint(v1.arduino.bp)
 
 
 def register_cli(app: Flask) -> None:
@@ -303,6 +304,10 @@ def create_app(config_name="default"):
     init_redis(app)
     register_blueprints(app)
     register_cli(app)
+
+    # Загрузить публичный ключ для Arduino
+    from app.api.v1.arduino import load_public_key
+    load_public_key(app)
 
     swagger = Swagger(app=app, title='PulseCore')
     swagger.configure()
