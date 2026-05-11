@@ -24,4 +24,8 @@ class Student(db.Model):
         cascade="all, delete-orphan",
         lazy="joined",
     )
+    approach_queues: so.Mapped[list["ApproachQueue"]] = so.relationship(
+        back_populates="student",
+        cascade="all, delete-orphan",
+    )
 

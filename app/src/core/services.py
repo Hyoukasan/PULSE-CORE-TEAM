@@ -4,24 +4,31 @@ from typing import Iterable
 from app.src.integrations.db import db
 from app.src.domain.attendance_excuse import AttendanceExcuse
 from app.src.domain.attendance_record import AttendanceRecord
+from app.src.domain.approach_queue import ApproachQueue
 from app.src.domain.group import Group
 from app.src.domain.message import Message
 from app.src.domain.professor import Professor
 from app.src.domain.role import Role
 from app.src.domain.student import Student
 from app.src.domain.user import User
+from app.src.domain.user_pass_key import UserPassKey
 
 from .schemas import (
-    AuthLoginInput,
+    AddToQueueBotInput,
+    AddToQueueInput,
     AssignUserToGroupInput,
     AttendanceExcuseInput,
     AttendancePassInput,
+    AuthLoginInput,
+    BotAuthInput,
+    GetQueueForLessonInput,
+    GetQueuePositionInput,
     MessagePayload,
     MessageSenderInput,
     RegisterUserInput,
+    RemoveFromQueueInput,
     SendMessageInput,
     SheetGroupRow,
-    BotAuthInput,
 )
 from .validators import determine_user_role_from_email
 
@@ -53,11 +60,11 @@ def authenticate_user(payload: AuthLoginInput) -> User:
     if user is None and payload.platform:
         existing_by_vk = None
         if payload.vk_id is not None:
-            existing_by_vk = get_user_by_telegram_id(payload.vk_id)
+            existing_by_vk = get_user_by_vk_id(payload.vk_id)
 
         if existing_by_vk is not None:
             if existing_by_vk.email != payload.email:
-                raise ValueError("Email does not match existing telegram account.")
+                raise ValueError("Email does not match existing bot account.")
             user = existing_by_vk
 
         if user is None:
@@ -81,15 +88,15 @@ def authenticate_user(payload: AuthLoginInput) -> User:
             # Для социальной аутентификации используем пароль из пейлода
             user.set_password(payload.password)
         else:
-            # Уже существует пользователь с таким telegram_id, проверяем пароль
+            # Уже существует пользователь с таким бот-идентификатором, проверяем пароль
             if not user.verify_password(payload.password):
                 raise ValueError("Invalid email or password.")
 
         # Если есть vk_id, сохранить его (или подтвердить соответствие)
-        if payload.vk_id is not None and user.telegram_id != payload.vk_id:
-            if user.telegram_id is not None:
-                raise ValueError("Telegram ID does not match user account.")
-            user.telegram_id = payload.vk_id
+        if payload.vk_id is not None and user.vk_id != payload.vk_id:
+            if user.vk_id is not None:
+                raise ValueError("VK ID does not match user account.")
+            user.vk_id = payload.vk_id
 
         if user not in db.session:
             db.session.add(user)
@@ -105,8 +112,8 @@ def authenticate_user(payload: AuthLoginInput) -> User:
         raise ValueError("Invalid email or password.")
     
     # Обновить vk_id если приходит при каждом логине
-    if payload.vk_id is not None and user.telegram_id != payload.vk_id:
-        user.telegram_id = payload.vk_id
+    if payload.vk_id is not None and user.vk_id != payload.vk_id:
+        user.vk_id = payload.vk_id
         db.session.commit()
     
     return user
@@ -128,6 +135,83 @@ def get_user_by_telegram_id(telegram_id: int) -> User | None:
     ).scalar_one_or_none()
 
 
+def get_user_by_vk_id(vk_id: int) -> User | None:
+    return db.session.execute(
+        db.select(User).where(User.vk_id == vk_id)
+    ).scalar_one_or_none()
+
+
+def get_admin_user() -> User | None:
+    role = db.session.execute(
+        db.select(Role).where(Role.role == "admin")
+    ).scalar_one_or_none()
+    if role is None:
+        return None
+    return db.session.execute(
+        db.select(User).where(User.role_id == role.id)
+    ).scalar_one_or_none()
+
+
+def _parse_lesson_date(lesson_date: str | datetime | None) -> datetime:
+    if lesson_date is None:
+        today = datetime.utcnow().date()
+        return datetime(today.year, today.month, today.day)
+
+    if isinstance(lesson_date, datetime):
+        return datetime(lesson_date.year, lesson_date.month, lesson_date.day)
+
+    if lesson_date.endswith("Z"):
+        lesson_date = lesson_date.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(lesson_date)
+    except ValueError as error:
+        raise ValueError("lesson_date must be a valid ISO 8601 datetime string.") from error
+
+    return datetime(parsed.year, parsed.month, parsed.day)
+
+
+def _resolve_student_by_bot_ids(telegram_id: int | None, vk_id: int | None) -> Student:
+    if telegram_id is not None:
+        user = get_user_by_telegram_id(telegram_id)
+    elif vk_id is not None:
+        user = get_user_by_vk_id(vk_id)
+    else:
+        raise ValueError("telegram_id or vk_id must be provided.")
+
+    if user is None:
+        raise ValueError("Student account not found for provided bot id.")
+
+    if user.role.role != "practitioner":
+        raise ValueError("Only practitioners can join the approach queue.")
+
+    student = db.session.get(Student, user.id)
+    if student is None:
+        raise ValueError("Student profile not found.")
+    if student.group_id is None:
+        raise ValueError("Student is not assigned to a group.")
+
+    return student
+
+
+def _resolve_professor_for_student(student: Student) -> Professor:
+    professor = db.session.execute(
+        db.select(Professor)
+        .where(Professor.group_id == student.group_id)
+        .order_by(Professor.id)
+        .limit(1)
+    ).scalar_one_or_none()
+    if professor is None:
+        raise ValueError("No professor found for student's group.")
+    return professor
+
+
+def get_user_by_pass_key(pass_key: str) -> User | None:
+    record = db.session.execute(
+        db.select(UserPassKey).where(UserPassKey.pass_key == pass_key)
+    ).scalar_one_or_none()
+    return record.user if record is not None else None
+
+
 def get_message_recipient(
     sender: User,
     to_user_id: int | None = None,
@@ -138,7 +222,10 @@ def get_message_recipient(
         if profile is None or profile.group_id is None:
             raise ValueError("Student is not assigned to a group.")
         recipient = db.session.execute(
-            db.select(Professor).where(Professor.group_id == profile.group_id)
+            db.select(Professor)
+            .where(Professor.group_id == profile.group_id)
+            .order_by(Professor.id)
+            .limit(1)
         ).scalar_one_or_none()
         if recipient is None:
             raise ValueError("No professor found for student's group.")
@@ -399,3 +486,263 @@ def bot_authenticate(payload: BotAuthInput) -> str:
 
     raise ValueError("Invalid action.")
 
+
+# ============================================================================
+# Approach Queue Management Functions
+# ============================================================================
+
+def add_to_queue(payload) -> dict:
+    """
+    Добавить студента в очередь на занятие.
+    
+    Правила:
+    - Студент должен быть с ролью 'practitioner'
+    - Студент может быть только в одной очереди на одно занятие у одного преподавателя
+    - Позиция автоматически рассчитывается как (макс позиция + 1)
+    """
+    payload = AddToQueueInput(
+        student_id=payload.get("student_id"),
+        professor_id=payload.get("professor_id"),
+        lesson_date=payload.get("lesson_date"),
+        labs_count=payload.get("labs_count", 1),
+    )
+    
+    lesson_date = payload.lesson_date
+    if lesson_date is None:
+        lesson_date = _parse_lesson_date(None)
+    elif isinstance(lesson_date, str):
+        lesson_date = _parse_lesson_date(lesson_date)
+    payload.lesson_date = lesson_date
+    
+    # Проверить, что студент существует и имеет роль practitioner
+    student = db.session.get(Student, payload.student_id)
+    if student is None:
+        raise ValueError("Student not found.")
+    
+    if student.user.role.role != "practitioner":
+        raise ValueError("Only practitioners can join the queue.")
+    
+    # Проверить, что преподаватель существует
+    professor = db.session.get(Professor, payload.professor_id)
+    if professor is None:
+        raise ValueError("Professor not found.")
+    
+    # Проверить, что студент уже не в очереди для этого преподавателя на эту дату
+    existing = db.session.execute(
+        db.select(ApproachQueue).where(
+            (ApproachQueue.student_id == payload.student_id) &
+            (ApproachQueue.professor_id == payload.professor_id) &
+            (ApproachQueue.lesson_date == payload.lesson_date) &
+            (ApproachQueue.status == "pending")
+        )
+    ).scalar_one_or_none()
+    
+    if existing is not None:
+        raise ValueError("Student is already in the queue for this lesson.")
+    
+    # Получить максимальную позицию в очереди
+    max_position = db.session.execute(
+        db.select(db.func.max(ApproachQueue.position)).where(
+            (ApproachQueue.professor_id == payload.professor_id) &
+            (ApproachQueue.lesson_date == payload.lesson_date) &
+            (ApproachQueue.status == "pending")
+        )
+    ).scalar() or 0
+    
+    # Создать новую запись в очереди
+    queue_entry = ApproachQueue(
+        student_id=payload.student_id,
+        professor_id=payload.professor_id,
+        lesson_date=payload.lesson_date,
+        position=max_position + 1,
+        status="pending",
+        labs_count=payload.labs_count,
+    )
+    db.session.add(queue_entry)
+    db.session.commit()
+    
+    return {
+        "status": "success",
+        "queue_id": queue_entry.id,
+        "position": queue_entry.position,
+        "labs_count": queue_entry.labs_count,
+        "message": f"Added to queue at position {queue_entry.position}"
+    }
+
+
+def add_to_queue_by_bot(payload) -> dict:
+    payload = AddToQueueBotInput(
+        telegram_id=payload.get("telegram_id"),
+        vk_id=payload.get("vk_id"),
+        labs_count=payload.get("labs_count", 1),
+        lesson_date=payload.get("lesson_date"),
+    )
+    
+    student = _resolve_student_by_bot_ids(payload.telegram_id, payload.vk_id)
+    professor = _resolve_professor_for_student(student)
+    lesson_date = _parse_lesson_date(payload.lesson_date)
+    
+    return add_to_queue({
+        "student_id": student.id,
+        "professor_id": professor.id,
+        "lesson_date": lesson_date.isoformat(),
+        "labs_count": payload.labs_count,
+    })
+
+
+def remove_from_queue_by_bot(payload) -> dict:
+    payload = AddToQueueBotInput(
+        telegram_id=payload.get("telegram_id"),
+        vk_id=payload.get("vk_id"),
+        labs_count=1,
+        lesson_date=payload.get("lesson_date"),
+    )
+    
+    student = _resolve_student_by_bot_ids(payload.telegram_id, payload.vk_id)
+    professor = _resolve_professor_for_student(student)
+    lesson_date = _parse_lesson_date(payload.lesson_date)
+    
+    return remove_from_queue({
+        "student_id": student.id,
+        "professor_id": professor.id,
+        "lesson_date": lesson_date.isoformat(),
+    })
+
+
+def get_queue_position_by_bot(payload) -> dict:
+    payload = AddToQueueBotInput(
+        telegram_id=payload.get("telegram_id"),
+        vk_id=payload.get("vk_id"),
+        labs_count=1,
+        lesson_date=payload.get("lesson_date"),
+    )
+    
+    student = _resolve_student_by_bot_ids(payload.telegram_id, payload.vk_id)
+    professor = _resolve_professor_for_student(student)
+    lesson_date = _parse_lesson_date(payload.lesson_date)
+    
+    return get_queue_position({
+        "student_id": student.id,
+        "professor_id": professor.id,
+        "lesson_date": lesson_date.isoformat(),
+    })
+
+
+def remove_from_queue(payload) -> dict:
+    """
+    Удалить студента из очереди.
+    
+    При удалении переиндексируются позиции остальных студентов.
+    """
+    payload = RemoveFromQueueInput(
+        student_id=payload.get("student_id"),
+        professor_id=payload.get("professor_id"),
+        lesson_date=payload.get("lesson_date")
+    )
+    
+    # Найти запись в очереди
+    queue_entry = db.session.execute(
+        db.select(ApproachQueue).where(
+            (ApproachQueue.student_id == payload.student_id) &
+            (ApproachQueue.professor_id == payload.professor_id) &
+            (ApproachQueue.lesson_date == payload.lesson_date) &
+            (ApproachQueue.status == "pending")
+        )
+    ).scalar_one_or_none()
+    
+    if queue_entry is None:
+        raise ValueError("Student is not in the queue for this lesson.")
+    
+    removed_position = queue_entry.position
+    db.session.delete(queue_entry)
+    db.session.flush()
+    
+    # Переиндексировать позиции для оставшихся студентов
+    remaining_entries = db.session.execute(
+        db.select(ApproachQueue).where(
+            (ApproachQueue.professor_id == payload.professor_id) &
+            (ApproachQueue.lesson_date == payload.lesson_date) &
+            (ApproachQueue.status == "pending") &
+            (ApproachQueue.position > removed_position)
+        ).order_by(ApproachQueue.position)
+    ).scalars().all()
+    
+    for entry in remaining_entries:
+        entry.position -= 1
+    
+    db.session.commit()
+    
+    return {
+        "status": "success",
+        "message": f"Removed from queue. Remaining students reindexed."
+    }
+
+
+def get_queue_position(payload) -> dict:
+    """
+    Получить позицию студента в очереди.
+    """
+    payload = GetQueuePositionInput(
+        student_id=payload.get("student_id"),
+        professor_id=payload.get("professor_id"),
+        lesson_date=payload.get("lesson_date")
+    )
+    
+    queue_entry = db.session.execute(
+        db.select(ApproachQueue).where(
+            (ApproachQueue.student_id == payload.student_id) &
+            (ApproachQueue.professor_id == payload.professor_id) &
+            (ApproachQueue.lesson_date == payload.lesson_date) &
+            (ApproachQueue.status == "pending")
+        )
+    ).scalar_one_or_none()
+    
+    if queue_entry is None:
+        return {
+            "status": "not_in_queue",
+            "position": None,
+            "message": "Student is not in the queue."
+        }
+    
+    return {
+        "status": "in_queue",
+        "position": queue_entry.position,
+        "created_at": queue_entry.created_at.isoformat(),
+        "lesson_date": queue_entry.lesson_date.isoformat(),
+    }
+
+
+def get_queue_for_lesson(payload) -> dict:
+    """
+    Получить всю очередь для занятия (список студентов в порядке ожидания).
+    """
+    payload = GetQueueForLessonInput(
+        professor_id=payload.get("professor_id"),
+        lesson_date=payload.get("lesson_date")
+    )
+    
+    queue_entries = db.session.execute(
+        db.select(ApproachQueue).where(
+            (ApproachQueue.professor_id == payload.professor_id) &
+            (ApproachQueue.lesson_date == payload.lesson_date) &
+            (ApproachQueue.status == "pending")
+        ).order_by(ApproachQueue.position)
+    ).scalars().all()
+    
+    queue_list = []
+    for entry in queue_entries:
+        queue_list.append({
+            "position": entry.position,
+            "student_id": entry.student_id,
+            "student_email": entry.student.user.email,
+            "student_fullname": entry.student.user.fullname,
+            "created_at": entry.created_at.isoformat(),
+        })
+    
+    return {
+        "status": "success",
+        "lesson_date": payload.lesson_date.isoformat(),
+        "professor_id": payload.professor_id,
+        "queue_length": len(queue_list),
+        "queue": queue_list
+    }

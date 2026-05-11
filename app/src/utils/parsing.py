@@ -17,6 +17,7 @@ def parse_bot_webhook_request() -> dict:
     return {
         "action": data.get("action"),
         "telegram_id": data.get("telegram_id") or data.get("telegramId") or data.get("telegramid"),
+        "vk_id": data.get("vk_id") or data.get("vkId") or data.get("vkid"),
         "mail": data.get("mail") or data.get("email"),
         "password": data.get("password"),
         "fullname": data.get("fullname"),

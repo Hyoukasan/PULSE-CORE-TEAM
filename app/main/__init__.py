@@ -22,6 +22,33 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(v1.messages.bp)
     app.register_blueprint(v1.users.bp)
     app.register_blueprint(v1.arduino.bp)
+    app.register_blueprint(v1.queue.bp)
+
+
+def seed_roles() -> int:
+    """Insert base roles if they do not exist."""
+    from app.src.domain.role import Role
+
+    base_roles = (
+        "admin",
+        "student",
+        "student_lecture",
+        "practitioner",
+        "listener",
+        "professor",
+    )
+    created_count = 0
+
+    for role_name in base_roles:
+        exists = db.session.execute(
+            db.select(Role).where(Role.role == role_name)
+        ).scalar_one_or_none()
+        if exists is None:
+            db.session.add(Role(role=role_name))
+            created_count += 1
+
+    db.session.commit()
+    return created_count
 
 
 def register_cli(app: Flask) -> None:
@@ -68,32 +95,10 @@ def register_cli(app: Flask) -> None:
         click.echo("DB reset (drop_all + create_all) and seeded base roles.")
 
     @app.cli.command("seed-roles")
-    def seed_roles() -> None:
+    def cli_seed_roles() -> None:
         """Insert base roles if they do not exist."""
-        from app.src.domain.role import Role
-
-        base_roles = (
-            "admin",
-            "student",
-            "student_lecture",
-            "practitioner",
-            "listener",
-            "professor",
-        )
-        created_count = 0
-
-        with app.app_context():
-            for role_name in base_roles:
-                exists = db.session.execute(
-                    db.select(Role).where(Role.role == role_name)
-                ).scalar_one_or_none()
-                if exists is None:
-                    db.session.add(Role(role=role_name))
-                    created_count += 1
-
-            db.session.commit()
-
-        click.echo(f"Roles seeded. Created: {created_count}, total expected: {len(base_roles)}.")
+        created_count = seed_roles()
+        click.echo(f"Roles seeded. Created: {created_count}, total expected: 6.")
 
     @app.cli.command("db-smoke")
     def db_smoke() -> None:
@@ -304,6 +309,10 @@ def create_app(config_name="default"):
     init_redis(app)
     register_blueprints(app)
     register_cli(app)
+
+    with app.app_context():
+        db.create_all()
+        seed_roles()
 
     # Загрузить публичный ключ для Arduino
     from app.api.v1.arduino import load_public_key

@@ -5,3 +5,4 @@ from . import groups
 from . import messages
 from . import users
 from . import arduino
+from . import queue

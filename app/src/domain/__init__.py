@@ -6,3 +6,5 @@ from .group import Group
 from .message import Message
 from .attendance_record import AttendanceRecord
 from .attendance_excuse import AttendanceExcuse
+from .user_pass_key import UserPassKey
+from .approach_queue import ApproachQueue

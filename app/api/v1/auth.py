@@ -74,7 +74,7 @@ def bot_auth_route() -> tuple:
     data = parse_bot_webhook_request()
 
     if data["bot_id"] and data["platform"] and not any(
-        data[field] for field in ("action", "telegram_id", "mail", "password")
+        data[field] for field in ("action", "telegram_id", "vk_id", "mail", "password")
     ):
         return jsonify({
             "role": "bot_check_ok",
@@ -82,11 +82,11 @@ def bot_auth_route() -> tuple:
             "platform": data["platform"],
         }), 200
 
-    if not data["action"] or not data["telegram_id"] or not data["mail"] or not data["password"]:
+    if not data["action"] or (not data["telegram_id"] and not data["vk_id"]) or not data["mail"] or not data["password"]:
         missing_fields = [
             field
-            for field in ("action", "telegram_id", "mail", "password")
-            if not data[field]
+            for field in ("action", "telegram_id", "vk_id", "mail", "password")
+            if not data.get(field)
         ]
         return jsonify({
             "error": "invalid request",
@@ -97,7 +97,8 @@ def bot_auth_route() -> tuple:
     try:
         payload = BotAuthInput(
             action=data["action"],
-            telegram_id=int(data["telegram_id"]),
+            telegram_id=int(data["telegram_id"]) if data.get("telegram_id") is not None else None,
+            vk_id=int(data["vk_id"]) if data.get("vk_id") is not None else None,
             mail=data["mail"],
             password=data["password"],
             fullname=data.get("fullname"),
@@ -114,7 +115,7 @@ def bot_auth_route() -> tuple:
             return jsonify({"error": "wrong_password"}), 200
         return jsonify({"error": message}), 200
     except TypeError:
-        return jsonify({"error": "telegram_id must be integer."}), 200
+        return jsonify({"error": "telegram_id or vk_id must be integer."}), 200
 
 
 # @bp.post("/auth/bot")
