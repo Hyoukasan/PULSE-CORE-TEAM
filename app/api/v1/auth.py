@@ -61,13 +61,7 @@ def verify_user_route() -> tuple:
     if user is None:
         return jsonify({"role": "wrong_mail"}), 200
 
-    role_name = user.role.role
-    if role_name == "professor":
-        role_name = "teacher"
-    elif role_name not in {"student", "student_lecture", "practitioner", "listener", "admin"}:
-        role_name = "student"
-
-    return jsonify({"role": role_name}), 200
+    return jsonify({"role": user.role.role}), 200
 
 @bp.post("/bot")
 def bot_auth_route() -> tuple:
@@ -117,24 +111,3 @@ def bot_auth_route() -> tuple:
     except TypeError:
         return jsonify({"error": "telegram_id or vk_id must be integer."}), 200
 
-
-# @bp.post("/auth/bot")
-# @bp.post("/auth/bot/webhook")
-# @bp.post("/webhook/bot")
-# def bot_auth_route() -> tuple:
-#     data = request.get_json(silent=True) or {}
-#     try:
-#         payload = BotAuthInput(
-#             action=data["action"],
-#             telegram_id=int(data["telegram_id"]),
-#             mail=data["mail"],
-#             password=data["password"],
-#         )
-#         response = bot_authenticate(payload)
-#         return jsonify({"response": response, "role": response}), 200
-#     except KeyError as error:
-#         return jsonify({"error": f"missing field: {error.args[0]}"}), 400
-#     except ValueError as error:
-#         return jsonify({"error": str(error)}), 400
-#     except TypeError:
-#         return jsonify({"error": "telegram_id must be integer."}), 400

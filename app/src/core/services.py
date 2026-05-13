@@ -141,6 +141,14 @@ def get_user_by_vk_id(vk_id: int) -> User | None:
     ).scalar_one_or_none()
 
 
+def get_user_by_bot_ids(telegram_id: int | None, vk_id: int | None) -> User | None:
+    if telegram_id is not None:
+        return get_user_by_telegram_id(telegram_id)
+    if vk_id is not None:
+        return get_user_by_vk_id(vk_id)
+    return None
+
+
 def get_admin_user() -> User | None:
     role = db.session.execute(
         db.select(Role).where(Role.role == "admin")
@@ -216,30 +224,25 @@ def get_message_recipient(
     sender: User,
     to_user_id: int | None = None,
     to_telegram_id: int | None = None,
+    to_vk_id: int | None = None,
 ) -> User:
-    if sender.role.role in {"student", "student_lecture", "practitioner", "listener"}:
-        profile = db.session.get(Student, sender.id)
-        if profile is None or profile.group_id is None:
-            raise ValueError("Student is not assigned to a group.")
-        recipient = db.session.execute(
-            db.select(Professor)
-            .where(Professor.group_id == profile.group_id)
-            .order_by(Professor.id)
-            .limit(1)
-        ).scalar_one_or_none()
-        if recipient is None:
-            raise ValueError("No professor found for student's group.")
-        return recipient.user
+    if sender.role.role in {"practitioner", "listener"}:
+        admin = get_admin_user()
+        if admin is None:
+            raise ValueError("Admin user not found.")
+        return admin
 
     if sender.role.role == "professor":
-        if not any((to_user_id, to_telegram_id)):
-            raise ValueError("Professor must specify recipient user_id or telegram_id.")
+        if not any((to_user_id, to_telegram_id, to_vk_id)):
+            raise ValueError("Professor must specify recipient user_id, telegram_id, or vk_id.")
 
         recipient = None
         if to_user_id is not None:
             recipient = get_user_by_id(to_user_id)
         elif to_telegram_id is not None:
             recipient = get_user_by_telegram_id(to_telegram_id)
+        elif to_vk_id is not None:
+            recipient = get_user_by_vk_id(to_vk_id)
 
         if recipient is None:
             raise ValueError("Student recipient not found.")
@@ -247,7 +250,7 @@ def get_message_recipient(
             raise ValueError("Recipient must be a student.")
         return recipient
 
-    raise ValueError("Only students and professors can send messages.")
+    raise ValueError("Only practitioner, listener, and professor can send messages.")
 
 
 def send_message(payload: SendMessageInput) -> Message:
@@ -256,6 +259,8 @@ def send_message(payload: SendMessageInput) -> Message:
         sender = db.session.get(User, payload.sender.user_id)
     if sender is None and payload.sender.telegram_id is not None:
         sender = get_user_by_telegram_id(payload.sender.telegram_id)
+    if sender is None and payload.sender.vk_id is not None:
+        sender = get_user_by_vk_id(payload.sender.vk_id)
     if sender is None:
         raise ValueError("Sender not found.")
 
@@ -263,6 +268,7 @@ def send_message(payload: SendMessageInput) -> Message:
         sender,
         to_user_id=payload.to_user_id,
         to_telegram_id=payload.to_telegram_id,
+        to_vk_id=payload.to_vk_id,
     )
     
     message = Message(
@@ -274,6 +280,32 @@ def send_message(payload: SendMessageInput) -> Message:
     db.session.add(message)
     db.session.commit()
     return message
+
+
+def serialize_message(message: Message) -> dict:
+    return {
+        "id": message.id,
+        "sender": serialize_user_info(message.sender),
+        "recipient": serialize_user_info(message.recipient),
+        "type": message.message_type,
+        "text": message.text,
+        "status": message.status,
+        "created_at": message.created_at.isoformat(),
+    }
+
+
+def get_messages_for_admin() -> list[dict]:
+    admin = get_admin_user()
+    if admin is None:
+        raise ValueError("Admin user not found.")
+
+    messages = db.session.execute(
+        db.select(Message)
+        .where(Message.recipient_id == admin.id)
+        .order_by(Message.created_at.desc())
+    ).scalars().all()
+
+    return [serialize_message(message) for message in messages]
 
 
 def serialize_user_info(user: User) -> dict:
@@ -463,7 +495,7 @@ def bot_authenticate(payload: BotAuthInput) -> str:
         user.set_password(payload.password)
         db.session.add(user)
         db.session.commit()
-        return _normalize_user_role(user.role.role)
+        return role.role
 
     elif payload.action == "enter":
         user = db.session.execute(
@@ -482,7 +514,7 @@ def bot_authenticate(payload: BotAuthInput) -> str:
             user.telegram_id = payload.telegram_id
             db.session.commit()
 
-        return _normalize_user_role(user.role.role)
+        return user.role.role
 
     raise ValueError("Invalid action.")
 

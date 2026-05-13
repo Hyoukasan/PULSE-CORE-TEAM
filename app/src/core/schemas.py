@@ -178,25 +178,36 @@ class MessagePayload:
 @dataclass
 class MessageSenderInput:
     user_id: Optional[int]
-    role: str
+    role: Optional[str] = None
     email: Optional[str] = None
     fullname: Optional[str] = None
     group: Optional[str] = None
     platform: Optional[str] = None
     telegram_id: Optional[int] = None
+    vk_id: Optional[int] = None
 
     def __post_init__(self) -> None:
         if self.user_id is not None and self.user_id <= 0:
             raise ValueError("user_id must be > 0.")
         if self.telegram_id is not None and self.telegram_id <= 0:
             raise ValueError("telegram_id must be > 0.")
+        if self.vk_id is not None and self.vk_id <= 0:
+            raise ValueError("vk_id must be > 0.")
         if self.email is not None:
             self.email = validate_email(self.email)
-        self.role = validate_non_empty(self.role, "role")
+        if self.role is not None:
+            self.role = validate_role(self.role)
         if self.fullname is not None:
             self.fullname = validate_non_empty(self.fullname, "fullname")
         if self.group is not None:
             self.group = validate_non_empty(self.group, "group")
+        if self.role in {"practitioner", "listener"}:
+            has_telegram = self.telegram_id is not None
+            has_vk = self.vk_id is not None
+            if not (has_telegram or has_vk):
+                raise ValueError("For practitioner/listener sender either telegram_id or vk_id must be provided.")
+            if has_telegram and has_vk:
+                raise ValueError("For practitioner/listener sender provide either telegram_id or vk_id, not both.")
 
 
 @dataclass
@@ -205,12 +216,15 @@ class SendMessageInput:
     message: MessagePayload
     to_user_id: Optional[int] = None
     to_telegram_id: Optional[int] = None
+    to_vk_id: Optional[int] = None
 
     def __post_init__(self) -> None:
         if self.to_user_id is not None and self.to_user_id <= 0:
             raise ValueError("to_user_id must be > 0.")
         if self.to_telegram_id is not None and self.to_telegram_id <= 0:
             raise ValueError("to_telegram_id must be > 0.")
+        if self.to_vk_id is not None and self.to_vk_id <= 0:
+            raise ValueError("to_vk_id must be > 0.")
 
 
 @dataclass
