@@ -19,7 +19,8 @@ class Config:
             "check_same_thread": False,
         }
     }
-    SHEETS_SYNC_API_KEY = os.environ.get("SHEETS_SYNC_API_KEY")
+    SHEETS_SYNC_API_KEY = os.environ.get("SHEETS_SYNC_API_KEY", "sheets2026")
+    SYNC_CALLBACK_URL = os.environ.get("SYNC_CALLBACK_URL")
     REDIS_HOST = os.getenv("REDIS_HOST")
     REDIS_PORT = os.environ.get("REDIS_PORT", 6379)
     REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")

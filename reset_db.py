@@ -43,11 +43,8 @@ with app.app_context():
         print("Seeding roles...")
         base_roles = (
             "admin",
-            "student",
-            "student_lecture",
             "practitioner",
             "listener",
-            "professor",
         )
         created_count = 0
         

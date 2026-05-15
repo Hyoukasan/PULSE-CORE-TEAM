@@ -23,10 +23,14 @@ from app.src.core.services import (
     get_messages_for_admin,
     register_user,
     send_message,
+    send_broadcast,
+    serialize_message,
     serialize_user_info,
     submit_attendance_excuse,
     sync_groups_from_sheet,
     bot_authenticate,
+    get_messages_for_user,
+    get_messages_for_bot_user,
 )
 
 bp = Blueprint("messages_v1", __name__, url_prefix="/api/v1/messages")
@@ -85,13 +89,9 @@ def send_message_route() -> tuple:
         else:
             sender = MessageSenderInput(
                 user_id=(
-                    int(sender_data["user_id"])
-                    if sender_data.get("user_id") is not None
-                    else (
-                        int(data["user_id"])
-                        if data.get("user_id") is not None
-                        else None
-                    )
+                    int(sender_data["user_id"]) if sender_data.get("user_id") is not None
+                    else (int(sender_data["admin_id"]) if sender_data.get("admin_id") is not None
+                    else (int(data["user_id"]) if data.get("user_id") is not None else (int(data["admin_id"]) if data.get("admin_id") is not None else None)))
                 ),
                 role=(
                     sender_data.get("role")
@@ -172,14 +172,26 @@ def send_message_route() -> tuple:
                     else None
                 )
             ),
+            to_group_number=(
+                data.get("to_group_number")
+                if data.get("to_group_number") is not None
+                else (
+                    to_data.get("group_number")
+                    if to_data.get("group_number") is not None
+                    else None
+                )
+            ),
         )
+
+        # If admin requests broadcast to group
+        if payload.to_group_number is not None:
+            result = send_broadcast(payload)
+            return jsonify({"success": True, "broadcast_created": result.get("created", 0)}), 200
 
         message = send_message(payload)
         return jsonify({
             "success": True,
-            "message_id": message.id,
-            "status": message.status,
-            "created_at": message.created_at.isoformat(),
+            "message": serialize_message(message),
         }), 200
     except KeyError as error:
         return jsonify({"error": f"missing field: {error.args[0]}"}), 200
@@ -192,11 +204,43 @@ def send_message_route() -> tuple:
 @bp.get("")
 def get_admin_messages_route() -> tuple:
     try:
+        telegram_id = request.args.get("telegram_id")
+        vk_id = request.args.get("vk_id")
+
+        if telegram_id is not None or vk_id is not None:
+            if telegram_id is not None:
+                telegram_id = int(telegram_id)
+            if vk_id is not None:
+                vk_id = int(vk_id)
+            messages = get_messages_for_bot_user(
+                telegram_id=telegram_id,
+                vk_id=vk_id,
+            )
+            return jsonify({"success": True, "messages": messages}), 200
+
         messages = get_messages_for_admin()
         return jsonify({"success": True, "messages": messages}), 200
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
     except Exception as error:
         current_app.logger.error(f"Error fetching admin messages: {error}")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@bp.get("/<int:user_id>")
+def get_user_messages_route(user_id: int) -> tuple:
+    try:
+        try:
+            messages = get_messages_for_user(user_id)
+        except ValueError:
+            messages = get_messages_for_bot_user(
+                telegram_id=user_id,
+                vk_id=user_id,
+            )
+        return jsonify({"success": True, "messages": messages}), 200
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception as error:
+        current_app.logger.error(f"Error fetching user messages for {user_id}: {error}")
         return jsonify({"error": "Internal server error"}), 500
 

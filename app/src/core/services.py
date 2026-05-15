@@ -29,6 +29,8 @@ from .schemas import (
     RemoveFromQueueInput,
     SendMessageInput,
     SheetGroupRow,
+    SheetUserRow,
+    SheetAttendanceRow,
 )
 from .validators import determine_user_role_from_email
 
@@ -49,6 +51,17 @@ def _normalize_user_role(role_name: str) -> str:
     if role_name in {"student", "student_lecture", "practitioner", "listener", "admin"}:
         return role_name
     return role_name
+
+
+def ensure_user_not_banned(user: User) -> None:
+    """Raise ValueError if the user is currently banned.
+
+    A NULL/None `ban_expires_at` means the user is not banned.
+    """
+    if user is None:
+        return
+    if user.ban_expires_at is not None and user.ban_expires_at > datetime.utcnow():
+        raise ValueError(f"User is banned until {user.ban_expires_at.isoformat()}")
 
 
 def authenticate_user(payload: AuthLoginInput) -> User:
@@ -87,6 +100,8 @@ def authenticate_user(payload: AuthLoginInput) -> User:
             )
             # Для социальной аутентификации используем пароль из пейлода
             user.set_password(payload.password)
+            if role.role in {"practitioner", "listener"}:
+                ensure_student_profile(user)
         else:
             # Уже существует пользователь с таким бот-идентификатором, проверяем пароль
             if not user.verify_password(payload.password):
@@ -105,6 +120,7 @@ def authenticate_user(payload: AuthLoginInput) -> User:
         except Exception as error:
             db.session.rollback()
             raise ValueError("Unable to create or update user during social login.") from error
+        ensure_user_not_banned(user)
         return user
     
     # Обычная аутентификация по паролю
@@ -115,7 +131,7 @@ def authenticate_user(payload: AuthLoginInput) -> User:
     if payload.vk_id is not None and user.vk_id != payload.vk_id:
         user.vk_id = payload.vk_id
         db.session.commit()
-    
+    ensure_user_not_banned(user)
     return user
 
 
@@ -141,12 +157,34 @@ def get_user_by_vk_id(vk_id: int) -> User | None:
     ).scalar_one_or_none()
 
 
+def ensure_student_profile(user: User, group_id: int | None = None) -> Student:
+    student = db.session.get(Student, user.id)
+    if student is None:
+        student = Student(user=user, group_id=group_id)
+        db.session.add(student)
+    elif group_id is not None and student.group_id != group_id:
+        student.group_id = group_id
+    return student
+
+
 def get_user_by_bot_ids(telegram_id: int | None, vk_id: int | None) -> User | None:
     if telegram_id is not None:
-        return get_user_by_telegram_id(telegram_id)
+        user = get_user_by_telegram_id(telegram_id)
+        if user is not None:
+            return user
     if vk_id is not None:
         return get_user_by_vk_id(vk_id)
     return None
+
+
+def get_user_by_system_or_bot_id(user_id: int) -> User | None:
+    user = db.session.get(User, user_id)
+    if user is not None:
+        return user
+    user = get_user_by_telegram_id(user_id)
+    if user is not None:
+        return user
+    return get_user_by_vk_id(user_id)
 
 
 def get_admin_user() -> User | None:
@@ -194,7 +232,9 @@ def _resolve_student_by_bot_ids(telegram_id: int | None, vk_id: int | None) -> S
 
     student = db.session.get(Student, user.id)
     if student is None:
-        raise ValueError("Student profile not found.")
+        student = Student(id=user.id, group_id=None)
+        db.session.add(student)
+        db.session.commit()
     if student.group_id is None:
         raise ValueError("Student is not assigned to a group.")
 
@@ -208,8 +248,22 @@ def _resolve_professor_for_student(student: Student) -> Professor:
         .order_by(Professor.id)
         .limit(1)
     ).scalar_one_or_none()
+    if professor is not None:
+        return professor
+
+    admin = get_admin_user()
+    if admin is None:
+        raise ValueError("No professor found for student's group, and no admin user is available.")
+
+    professor = db.session.get(Professor, admin.id)
     if professor is None:
-        raise ValueError("No professor found for student's group.")
+        professor = Professor(id=admin.id, group_id=student.group_id)
+        db.session.add(professor)
+        db.session.commit()
+    elif professor.group_id != student.group_id:
+        professor.group_id = student.group_id
+        db.session.commit()
+
     return professor
 
 
@@ -226,15 +280,16 @@ def get_message_recipient(
     to_telegram_id: int | None = None,
     to_vk_id: int | None = None,
 ) -> User:
-    if sender.role.role in {"practitioner", "listener"}:
+    # Users (practitioner/listener/student) send messages only to admin.
+    if sender.role.role in {"practitioner", "listener", "student", "student_lecture"}:
         admin = get_admin_user()
         if admin is None:
             raise ValueError("Admin user not found.")
         return admin
 
-    if sender.role.role == "professor":
+    if sender.role.role == "admin":
         if not any((to_user_id, to_telegram_id, to_vk_id)):
-            raise ValueError("Professor must specify recipient user_id, telegram_id, or vk_id.")
+            raise ValueError("Admin must specify recipient user_id, telegram_id, or vk_id.")
 
         recipient = None
         if to_user_id is not None:
@@ -245,18 +300,18 @@ def get_message_recipient(
             recipient = get_user_by_vk_id(to_vk_id)
 
         if recipient is None:
-            raise ValueError("Student recipient not found.")
-        if recipient.role.role not in {"student", "student_lecture", "practitioner", "listener"}:
-            raise ValueError("Recipient must be a student.")
+            raise ValueError("Recipient not found.")
+        if recipient.role.role not in {"practitioner", "listener", "student", "student_lecture"}:
+            raise ValueError("Recipient must be a practitioner or listener.")
         return recipient
 
-    raise ValueError("Only practitioner, listener, and professor can send messages.")
+    raise ValueError("Only practitioner, listener, and admin can send messages.")
 
 
 def send_message(payload: SendMessageInput) -> Message:
     sender = None
     if payload.sender.user_id is not None:
-        sender = db.session.get(User, payload.sender.user_id)
+        sender = get_user_by_system_or_bot_id(payload.sender.user_id)
     if sender is None and payload.sender.telegram_id is not None:
         sender = get_user_by_telegram_id(payload.sender.telegram_id)
     if sender is None and payload.sender.vk_id is not None:
@@ -270,10 +325,17 @@ def send_message(payload: SendMessageInput) -> Message:
         to_telegram_id=payload.to_telegram_id,
         to_vk_id=payload.to_vk_id,
     )
-    
+    # If an external message ID is provided, avoid storing duplicates.
+    external_id = getattr(payload, "external_message_id", None)
+    if external_id:
+        existing = db.session.execute(db.select(Message).where(Message.external_id == external_id)).scalar_one_or_none()
+        if existing is not None:
+            return existing
+
     message = Message(
         sender_id=sender.id,
         recipient_id=recipient.id,
+        external_id=external_id,
         message_type=payload.message.type or "text",
         text=payload.message.text,
     )
@@ -282,9 +344,62 @@ def send_message(payload: SendMessageInput) -> Message:
     return message
 
 
+def send_broadcast(payload: SendMessageInput) -> dict:
+    """Send message from admin to all students in a group (broadcast).
+
+    Returns dict with number of created messages.
+    """
+    if payload.to_group_number is None:
+        raise ValueError("to_group_number is required for broadcast")
+
+    sender = None
+    if payload.sender.user_id is not None:
+        sender = get_user_by_system_or_bot_id(payload.sender.user_id)
+    if sender is None:
+        raise ValueError("Sender not found.")
+
+    if sender.role.role != "admin":
+        raise ValueError("Only admin can send broadcast messages.")
+
+    group = db.session.execute(db.select(Group).where(Group.number == payload.to_group_number)).scalar_one_or_none()
+    if group is None:
+        raise ValueError("Group not found.")
+
+    # Collect students in the group
+    # Use .unique() because Student has joined eager-loaded collections (attendance_records),
+    # which can produce duplicate ORM objects in the raw rows. unique() de-duplicates them.
+    students = db.session.execute(db.select(Student).where(Student.group_id == group.id)).scalars().unique().all()
+    created = 0
+    external_id = getattr(payload, "external_message_id", None)
+
+    for student in students:
+        user = db.session.get(User, student.id)
+        if user is None:
+            continue
+        # Avoid duplicates by external_id
+        if external_id:
+            exists = db.session.execute(db.select(Message).where(Message.external_id == external_id, Message.recipient_id == user.id)).scalar_one_or_none()
+            if exists is not None:
+                continue
+
+        message = Message(
+            sender_id=sender.id,
+            recipient_id=user.id,
+            external_id=external_id,
+            message_type=payload.message.type or "text",
+            text=payload.message.text,
+        )
+        db.session.add(message)
+        created += 1
+
+    db.session.commit()
+    return {"created": created}
+
+
 def serialize_message(message: Message) -> dict:
     return {
         "id": message.id,
+        "external_id": message.external_id,
         "sender": serialize_user_info(message.sender),
         "recipient": serialize_user_info(message.recipient),
         "type": message.message_type,
@@ -302,6 +417,40 @@ def get_messages_for_admin() -> list[dict]:
     messages = db.session.execute(
         db.select(Message)
         .where(Message.recipient_id == admin.id)
+        .order_by(Message.created_at.desc())
+    ).scalars().all()
+
+    return [serialize_message(message) for message in messages]
+
+
+def get_messages_for_user(user_id: int) -> list[dict]:
+    user = get_user_by_id(user_id)
+    if user is None:
+        raise ValueError("User not found.")
+
+    messages = db.session.execute(
+        db.select(Message)
+        .where(Message.recipient_id == user.id)
+        .order_by(Message.created_at.desc())
+    ).scalars().all()
+
+    return [serialize_message(message) for message in messages]
+
+
+def get_messages_for_bot_user(
+    telegram_id: int | None = None,
+    vk_id: int | None = None,
+) -> list[dict]:
+    if telegram_id is None and vk_id is None:
+        raise ValueError("telegram_id or vk_id must be provided.")
+
+    user = get_user_by_bot_ids(telegram_id, vk_id)
+    if user is None:
+        raise ValueError("User not found.")
+
+    messages = db.session.execute(
+        db.select(Message)
+        .where(Message.recipient_id == user.id)
         .order_by(Message.created_at.desc())
     ).scalars().all()
 
@@ -326,6 +475,7 @@ def serialize_user_info(user: User) -> dict:
             "name": group.name,
         } if group is not None else None,
         "telegram_id": user.telegram_id,
+        "vk_id": user.vk_id,
     }
 
 
@@ -351,6 +501,8 @@ def register_user(payload: RegisterUserInput) -> User:
     user.set_password(payload.password)
 
     db.session.add(user)
+    if role.role in {"practitioner", "listener"}:
+        ensure_student_profile(user)
     db.session.commit()
     return user
 
@@ -373,6 +525,13 @@ def assign_user_to_group(payload: AssignUserToGroupInput) -> Group:
             db.session.add(profile)
         else:
             profile.group_id = group.id
+    elif user.role.role == "admin":
+        profile = db.session.get(Professor, user.id)
+        if profile is None:
+            profile = Professor(id=user.id, group_id=group.id)
+            db.session.add(profile)
+        else:
+            profile.group_id = group.id
     elif user.role.role == "professor":
         profile = db.session.get(Professor, user.id)
         if profile is None:
@@ -381,7 +540,7 @@ def assign_user_to_group(payload: AssignUserToGroupInput) -> Group:
         else:
             profile.group_id = group.id
     else:
-        raise ValueError("Only users with student-like roles or professor can be assigned to group.")
+        raise ValueError("Only users with student-like roles or admin/professor can be assigned to group.")
 
     db.session.commit()
     return group
@@ -392,17 +551,41 @@ def sync_groups_from_sheet(rows: Iterable[SheetGroupRow]) -> dict:
     updated = 0
     processed = 0
 
+    # Проверяем коллизии имен групп внутри запроса
+    seen_numbers: set[str] = set()
+    seen_names: set[str] = set()
+    for row in rows:
+        if row.number in seen_numbers:
+            raise ValueError(f"Duplicate group number in payload: {row.number}")
+        if row.name in seen_names:
+            raise ValueError(f"Duplicate group name in payload: {row.name}")
+        seen_numbers.add(row.number)
+        seen_names.add(row.name)
+
     for row in rows:
         processed += 1
         group = db.session.execute(
             db.select(Group).where(Group.number == row.number)
         ).scalar_one_or_none()
         if group is None:
+            existing_name = db.session.execute(
+                db.select(Group).where(Group.name == row.name)
+            ).scalar_one_or_none()
+            if existing_name is not None:
+                raise ValueError(
+                    f"Group name '{row.name}' already exists for another group number."
+                )
             db.session.add(Group(number=row.number, name=row.name))
             created += 1
             continue
 
         if group.name != row.name:
+            if db.session.execute(
+                db.select(Group).where(Group.name == row.name, Group.id != group.id)
+            ).scalar_one_or_none() is not None:
+                raise ValueError(
+                    f"Group name '{row.name}' is already used by another group."
+                )
             group.name = row.name
             updated += 1
 
@@ -411,6 +594,98 @@ def sync_groups_from_sheet(rows: Iterable[SheetGroupRow]) -> dict:
         "processed": processed,
         "created": created,
         "updated": updated,
+    }
+
+
+def sync_users_from_sheet(rows: Iterable[SheetUserRow]) -> dict:
+    processed = 0
+    updated = 0
+    skipped = 0
+    errors: list[str] = []
+
+    for row in rows:
+        processed += 1
+        user = get_user_by_email(row.email)
+        if user is None:
+            skipped += 1
+            errors.append(f"email not found: {row.email}")
+            continue
+
+        row_changed = False
+        if row.fullname is not None and user.fullname != row.fullname:
+            user.fullname = row.fullname
+            row_changed = True
+
+        group = None
+        if row.group_number is not None:
+            group = db.session.execute(
+                db.select(Group).where(Group.number == row.group_number)
+            ).scalar_one_or_none()
+            if group is None:
+                errors.append(f"{row.email}: group not found: {row.group_number}")
+                continue
+
+            if user.role.role in {"student", "student_lecture", "practitioner", "listener"}:
+                student = db.session.get(Student, user.id)
+                if student is None:
+                    student = Student(id=user.id, group_id=group.id)
+                    db.session.add(student)
+                    row_changed = True
+                elif student.group_id != group.id:
+                    student.group_id = group.id
+                    row_changed = True
+            elif user.role.role == "admin":
+                professor = db.session.get(Professor, user.id)
+                if professor is None:
+                    professor = Professor(id=user.id, group_id=group.id)
+                    db.session.add(professor)
+                    row_changed = True
+                elif professor.group_id != group.id:
+                    professor.group_id = group.id
+                    row_changed = True
+            elif user.role.role == "professor":
+                professor = db.session.get(Professor, user.id)
+                if professor is None:
+                    professor = Professor(id=user.id, group_id=group.id)
+                    db.session.add(professor)
+                    row_changed = True
+                elif professor.group_id != group.id:
+                    professor.group_id = group.id
+                    row_changed = True
+            else:
+                errors.append(f"{row.email}: role '{user.role.role}' cannot be assigned to group")
+                continue
+
+        if row.pass_id is not None or row.missed_passes is not None:
+            if user.role.role not in {"student", "student_lecture", "practitioner", "listener"}:
+                errors.append(f"{row.email}: pass data only supported for students")
+                continue
+
+            student = db.session.get(Student, user.id)
+            if student is None:
+                if group is None:
+                    errors.append(f"{row.email}: student profile missing; group_number required to create profile")
+                    continue
+                student = Student(id=user.id, group_id=group.id)
+                db.session.add(student)
+                row_changed = True
+
+            if row.pass_id is not None and student.pass_id != row.pass_id:
+                student.pass_id = row.pass_id
+                row_changed = True
+            if row.missed_passes is not None and student.missed_passes != row.missed_passes:
+                student.missed_passes = row.missed_passes
+                row_changed = True
+
+        if row_changed:
+            updated += 1
+
+    db.session.commit()
+    return {
+        "processed": processed,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
     }
 
 
@@ -472,11 +747,44 @@ def bot_authenticate(payload: BotAuthInput) -> str:
         ).scalar_one_or_none()
 
         if user is not None:
-            return "user_exist"
+            if not user.verify_password(payload.password):
+                return "wrong_password"
+
+            # Check ban status for existing user
+            try:
+                ensure_user_not_banned(user)
+            except ValueError:
+                return "banned"
+
+            if payload.telegram_id is not None:
+                existing_user_by_telegram = get_user_by_telegram_id(payload.telegram_id)
+                if existing_user_by_telegram is not None and existing_user_by_telegram.id != user.id:
+                    return "user_exist"
+                if user.telegram_id is None:
+                    user.telegram_id = payload.telegram_id
+                elif user.telegram_id != payload.telegram_id:
+                    return "user_exist"
+
+            if payload.vk_id is not None:
+                existing_user_by_vk = get_user_by_vk_id(payload.vk_id)
+                if existing_user_by_vk is not None and existing_user_by_vk.id != user.id:
+                    return "user_exist"
+                if user.vk_id is None:
+                    user.vk_id = payload.vk_id
+                elif user.vk_id != payload.vk_id:
+                    return "user_exist"
+
+            db.session.commit()
+            return user.role.role
 
         if payload.telegram_id is not None:
             existing_user_by_telegram = get_user_by_telegram_id(payload.telegram_id)
             if existing_user_by_telegram is not None:
+                return "user_exist"
+
+        if payload.vk_id is not None:
+            existing_user_by_vk = get_user_by_vk_id(payload.vk_id)
+            if existing_user_by_vk is not None:
                 return "user_exist"
 
         role = db.session.execute(
@@ -490,6 +798,7 @@ def bot_authenticate(payload: BotAuthInput) -> str:
             email=payload.mail,
             fullname=payload.fullname,
             telegram_id=payload.telegram_id,
+            vk_id=payload.vk_id,
             role_id=role.id,
         )
         user.set_password(payload.password)
@@ -507,16 +816,139 @@ def bot_authenticate(payload: BotAuthInput) -> str:
         if not user.verify_password(payload.password):
             return "wrong_password"
 
+        # Check ban status for existing user
+        try:
+            ensure_user_not_banned(user)
+        except ValueError:
+            return "banned"
+
         if payload.telegram_id is not None and user.telegram_id is not None and user.telegram_id != payload.telegram_id:
+            return "user_exist"
+
+        if payload.vk_id is not None and user.vk_id is not None and user.vk_id != payload.vk_id:
             return "user_exist"
 
         if payload.telegram_id is not None and user.telegram_id is None:
             user.telegram_id = payload.telegram_id
+
+        if payload.vk_id is not None and user.vk_id is None:
+            user.vk_id = payload.vk_id
+
+        if payload.telegram_id is not None or payload.vk_id is not None:
             db.session.commit()
 
         return user.role.role
 
     raise ValueError("Invalid action.")
+
+
+def export_users_for_sheet() -> list[dict]:
+    """
+    Экспортирует всех пользователей для Google Sheets.
+    Возвращает список с email, fullname, group_number, pass_id, missed_passes.
+    """
+    users = db.session.execute(db.select(User)).scalars().all()
+    result = []
+
+    for user in users:
+        row = {
+            "email": user.email,
+            "fullname": user.fullname,
+            "group_number": None,
+            "pass_id": None,
+            "missed_passes": None,
+        }
+
+        if user.student_profile is not None:
+            student = user.student_profile
+            row["group_number"] = student.group.number if student.group else None
+            row["pass_id"] = student.pass_id
+            row["missed_passes"] = student.missed_passes
+        elif user.professor_profile is not None:
+            professor = user.professor_profile
+            row["group_number"] = professor.group.number if professor.group else None
+
+        result.append(row)
+
+    return result
+
+
+def export_groups_for_sheet() -> list[dict]:
+    """
+    Экспортирует все группы для Google Sheets.
+    Возвращает список с number и name.
+    """
+    groups = db.session.execute(db.select(Group)).scalars().all()
+    return [{"number": group.number, "name": group.name} for group in groups]
+
+
+def sync_attendance_from_sheet(rows: Iterable[SheetAttendanceRow]) -> dict:
+    """
+    Импортирует записи посещений из Google Sheets.
+    Создаёт AttendanceRecord для каждой строки (только для attended=True).
+    """
+    processed = 0
+    created = 0
+    skipped = 0
+    errors: list[str] = []
+
+    for row in rows:
+        processed += 1
+        user = get_user_by_email(row.email)
+        if user is None:
+            skipped += 1
+            errors.append(f"user not found for email: {row.email}")
+            continue
+
+        student = db.session.get(Student, user.id)
+        if student is None:
+            skipped += 1
+            errors.append(f"{row.email}: not a student")
+            continue
+
+        if not row.attended:
+            continue
+
+        existing = db.session.execute(
+            db.select(AttendanceRecord).where(
+                (AttendanceRecord.student_id == student.id)
+                & (AttendanceRecord.timestamp == row.timestamp)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            continue
+
+        attendance = AttendanceRecord(student_id=student.id, timestamp=row.timestamp)
+        db.session.add(attendance)
+        created += 1
+
+    db.session.commit()
+    return {
+        "processed": processed,
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
+def export_attendance_for_sheet() -> list[dict]:
+    """
+    Экспортирует все записи посещений для Google Sheets.
+    Возвращает список с email, timestamp, attended=True.
+    """
+    records = db.session.execute(db.select(AttendanceRecord)).scalars().all()
+    result = []
+
+    for record in records:
+        if record.student and record.student.user:
+            row = {
+                "email": record.student.user.email,
+                "timestamp": record.timestamp.isoformat(),
+                "attended": True,
+            }
+            result.append(row)
+
+    return result
 
 
 # ============================================================================

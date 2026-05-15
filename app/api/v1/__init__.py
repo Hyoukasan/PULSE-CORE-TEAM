@@ -6,3 +6,4 @@ from . import messages
 from . import users
 from . import arduino
 from . import queue
+from . import google

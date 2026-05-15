@@ -217,6 +217,8 @@ class SendMessageInput:
     to_user_id: Optional[int] = None
     to_telegram_id: Optional[int] = None
     to_vk_id: Optional[int] = None
+    external_message_id: Optional[str] = None
+    to_group_number: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.to_user_id is not None and self.to_user_id <= 0:
@@ -235,6 +237,46 @@ class SheetGroupRow:
     def __post_init__(self) -> None:
         self.number = validate_group_number(self.number)
         self.name = validate_group_name(self.name)
+
+
+@dataclass
+class SheetUserRow:
+    email: str
+    fullname: Optional[str] = None
+    group_number: Optional[str] = None
+    pass_id: Optional[str] = None
+    missed_passes: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        self.email = validate_email(self.email)
+        if self.fullname is not None:
+            self.fullname = validate_non_empty(self.fullname, "fullname")
+        if self.group_number is not None:
+            self.group_number = validate_group_number(self.group_number)
+        if self.pass_id is not None:
+            self.pass_id = validate_non_empty(self.pass_id, "pass_id")
+        if self.missed_passes is not None:
+            if not isinstance(self.missed_passes, int) or self.missed_passes < 0:
+                raise ValueError("missed_passes must be a non-negative integer.")
+
+
+@dataclass
+class SheetAttendanceRow:
+    email: str
+    timestamp: str
+    attended: bool = True
+
+    def __post_init__(self) -> None:
+        self.email = validate_email(self.email)
+        self.timestamp = validate_non_empty(self.timestamp, "timestamp")
+        try:
+            from datetime import datetime as dt
+            parsed = dt.fromisoformat(self.timestamp.replace('Z', '+00:00'))
+            self.timestamp = parsed
+        except ValueError:
+            raise ValueError("timestamp must be a valid ISO 8601 datetime string.")
+        if not isinstance(self.attended, bool):
+            raise ValueError("attended must be a boolean.")
 
 
 @dataclass
