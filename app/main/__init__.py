@@ -24,6 +24,8 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(v1.arduino.bp)
     app.register_blueprint(v1.queue.bp)
     app.register_blueprint(v1.google.bp)
+    from app.api.v1.sync import bp as sync_bp
+    app.register_blueprint(sync_bp)
 
 
 def seed_roles() -> int:
@@ -320,6 +322,14 @@ def create_app(config_name="default"):
 
     swagger = Swagger(app=app, title='PulseCore')
     swagger.configure()
+
+    # Start background DB export worker (posts snapshot to configured URL)
+    try:
+        from app.src.integrations.exporter import start_db_export_worker
+
+        start_db_export_worker(app)
+    except Exception:
+        app.logger.exception("Failed to start DB export worker")
 
     return app
 

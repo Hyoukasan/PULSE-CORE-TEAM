@@ -145,6 +145,24 @@ def get_user_by_email(email: str) -> User | None:
     ).scalar_one_or_none()
 
 
+def set_user_ban(user: User, ban: bool, ban_expires_at: str | None = None) -> None:
+    if not ban:
+        user.ban_expires_at = None
+        return
+
+    if ban_expires_at is None:
+        user.ban_expires_at = datetime(9999, 12, 31, 23, 59, 59)
+        return
+
+    ban_value = ban_expires_at
+    if isinstance(ban_value, str) and ban_value.endswith("Z"):
+        ban_value = ban_value.replace("Z", "+00:00")
+    try:
+        user.ban_expires_at = datetime.fromisoformat(ban_value)
+    except Exception as error:
+        raise ValueError("ban_expires_at must be ISO 8601 string or null") from error
+
+
 def get_user_by_telegram_id(telegram_id: int) -> User | None:
     return db.session.execute(
         db.select(User).where(User.telegram_id == telegram_id)
@@ -365,15 +383,13 @@ def send_broadcast(payload: SendMessageInput) -> dict:
     if group is None:
         raise ValueError("Group not found.")
 
-    # Collect students in the group
-    # Use .unique() because Student has joined eager-loaded collections (attendance_records),
-    # which can produce duplicate ORM objects in the raw rows. unique() de-duplicates them.
-    students = db.session.execute(db.select(Student).where(Student.group_id == group.id)).scalars().unique().all()
+    # Collect students in the group: select only student ids to avoid joined eager-load duplication issues
+    student_ids = db.session.execute(db.select(Student.id).where(Student.group_id == group.id)).scalars().all()
     created = 0
     external_id = getattr(payload, "external_message_id", None)
 
-    for student in students:
-        user = db.session.get(User, student.id)
+    for student_id in student_ids:
+        user = db.session.get(User, student_id)
         if user is None:
             continue
         # Avoid duplicates by external_id
@@ -477,6 +493,13 @@ def serialize_user_info(user: User) -> dict:
         "telegram_id": user.telegram_id,
         "vk_id": user.vk_id,
     }
+
+
+def get_all_students() -> list[dict]:
+    users = db.session.execute(
+        db.select(User).join(Student)
+    ).scalars().all()
+    return [serialize_user_info(user) for user in users]
 
 
 def register_user(payload: RegisterUserInput) -> User:
@@ -851,12 +874,15 @@ def export_users_for_sheet() -> list[dict]:
     result = []
 
     for user in users:
+        ban_expires_at = user.ban_expires_at
         row = {
             "email": user.email,
             "fullname": user.fullname,
             "group_number": None,
             "pass_id": None,
             "missed_passes": None,
+            "ban_expires_at": ban_expires_at.isoformat() if ban_expires_at else None,
+            "is_banned": ban_expires_at is not None and ban_expires_at > datetime.utcnow(),
         }
 
         if user.student_profile is not None:
@@ -906,15 +932,21 @@ def sync_attendance_from_sheet(rows: Iterable[SheetAttendanceRow]) -> dict:
             errors.append(f"{row.email}: not a student")
             continue
 
-        if not row.attended:
-            continue
-
         existing = db.session.execute(
             db.select(AttendanceRecord).where(
                 (AttendanceRecord.student_id == student.id)
                 & (AttendanceRecord.timestamp == row.timestamp)
             )
         ).scalar_one_or_none()
+
+        if not row.attended:
+            if existing is not None:
+                db.session.delete(existing)
+                created += 1
+            else:
+                skipped += 1
+            continue
+
         if existing is not None:
             continue
 
@@ -1209,4 +1241,71 @@ def get_queue_for_lesson(payload) -> dict:
         "professor_id": payload.professor_id,
         "queue_length": len(queue_list),
         "queue": queue_list
+    }
+
+
+# ============================================================================
+# Broadcast Helper Functions (for bot)
+# ============================================================================
+
+def get_all_groups() -> list[dict]:
+    """Get all existing groups.
+    
+    Returns list of groups with id, number, and name.
+    """
+    groups = db.session.execute(db.select(Group)).scalars().all()
+    return [
+        {
+            "id": group.id,
+            "number": group.number,
+            "name": group.name,
+        }
+        for group in groups
+    ]
+
+
+def get_students_by_group_number(group_number: str) -> dict:
+    """Get all student user IDs in a group by group number.
+    
+    Returns dict with user_ids list.
+    """
+    group = db.session.execute(
+        db.select(Group).where(Group.number == group_number)
+    ).scalar_one_or_none()
+    
+    if group is None:
+        raise ValueError("Group not found.")
+    
+    student_ids = db.session.execute(
+        db.select(Student.id).where(Student.group_id == group.id)
+    ).scalars().all()
+
+    user_ids = student_ids
+    return {
+        "group_number": group.number,
+        "group_name": group.name,
+        "user_ids": user_ids,
+    }
+
+
+def get_students_by_group_id(group_id: int) -> dict:
+    """Get all student user IDs in a group by group id.
+
+    Returns dict with user_ids list.
+    """
+    group = db.session.get(Group, group_id)
+
+    if group is None:
+        raise ValueError("Group not found.")
+
+    student_ids = db.session.execute(
+        db.select(Student.id).where(Student.group_id == group.id)
+    ).scalars().all()
+
+    user_ids = student_ids
+    return {
+        "group_id": group.id,
+        "group_number": group.number,
+        "group_name": group.name,
+        "user_ids": user_ids,
     }

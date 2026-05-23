@@ -10,6 +10,7 @@ from app.src.core.services import (
     get_user_by_id,
     get_user_by_telegram_id,
     get_user_by_vk_id,
+    get_all_students,
     register_user,
     serialize_user_info,
 )
@@ -49,6 +50,12 @@ def get_user_route(user_id: int) -> tuple:
     return jsonify({"success": True, "user": serialize_user_info(user)}), 200
 
 
+@bp.get("/students")
+def get_students_route() -> tuple:
+    students = get_all_students()
+    return jsonify({"success": True, "students": students}), 200
+
+
 @bp.post("/ban")
 def ban_user_route() -> tuple:
     """Admin can set or clear `ban_expires_at` for a user.
@@ -64,6 +71,10 @@ def ban_user_route() -> tuple:
     admin = None
     if data.get("admin_id") is not None:
         admin = get_user_by_id(int(data["admin_id"]))
+        if admin is None:
+            admin = get_user_by_telegram_id(int(data["admin_id"]))
+        if admin is None:
+            admin = get_user_by_vk_id(int(data["admin_id"]))
     elif data.get("admin_telegram_id") is not None:
         admin = get_user_by_telegram_id(int(data["admin_telegram_id"]))
     elif data.get("admin_vk_id") is not None:
@@ -74,16 +85,18 @@ def ban_user_route() -> tuple:
     if admin is None or admin.role.role != "admin":
         return jsonify({"error": "admin not found or not authorized"}), 403
 
-    # Identify target user: accept user_id or target_telegram_id or target_vk_id
+    # Identify target user: accept user_id, target_user_id, target_telegram_id or target_vk_id
     user = None
     if data.get("user_id") is not None:
         user = get_user_by_id(int(data["user_id"]))
+    elif data.get("target_user_id") is not None:
+        user = get_user_by_id(int(data["target_user_id"]))
     elif data.get("target_telegram_id") is not None:
         user = get_user_by_telegram_id(int(data["target_telegram_id"]))
     elif data.get("target_vk_id") is not None:
         user = get_user_by_vk_id(int(data["target_vk_id"]))
     else:
-        return jsonify({"error": "missing target identifier (user_id or target_telegram_id or target_vk_id)"}), 200
+        return jsonify({"error": "missing target identifier (user_id or target_user_id or target_telegram_id or target_vk_id)"}), 200
 
     if user is None:
         return jsonify({"error": "target user not found"}), 404

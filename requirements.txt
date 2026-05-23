@@ -5,3 +5,4 @@ redis
 swagger-gen
 rsa
 cryptography
+requests

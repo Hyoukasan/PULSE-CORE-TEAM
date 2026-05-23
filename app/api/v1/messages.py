@@ -31,6 +31,8 @@ from app.src.core.services import (
     bot_authenticate,
     get_messages_for_user,
     get_messages_for_bot_user,
+    get_all_groups,
+    get_students_by_group_id,
 )
 
 bp = Blueprint("messages_v1", __name__, url_prefix="/api/v1/messages")
@@ -242,5 +244,37 @@ def get_user_messages_route(user_id: int) -> tuple:
         return jsonify({"error": str(error)}), 400
     except Exception as error:
         current_app.logger.error(f"Error fetching user messages for {user_id}: {error}")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@bp.get("/groups/list")
+def get_groups_route() -> tuple:
+    """Get all existing groups.
+    
+    Returns list with id, number, and name for each group.
+    Used by bot to fetch available groups before sending broadcast.
+    """
+    try:
+        groups = get_all_groups()
+        return jsonify({"success": True, "groups": groups}), 200
+    except Exception as error:
+        current_app.logger.error(f"Error fetching groups: {error}")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@bp.get("/groups/<int:group_id>/students")
+def get_group_students_route(group_id: int) -> tuple:
+    """Get all student user IDs in a specific group.
+    
+    Returns list of user.id for each student in the group.
+    Used by bot to get student IDs before sending individual messages.
+    """
+    try:
+        result = get_students_by_group_id(group_id)
+        return jsonify({"success": True, **result}), 200
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception as error:
+        current_app.logger.error(f"Error fetching students for group {group_id}: {error}")
         return jsonify({"error": "Internal server error"}), 500
 
