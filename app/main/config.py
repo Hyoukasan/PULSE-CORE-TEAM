@@ -18,7 +18,7 @@ class Config:
             "timeout": 30,
             "check_same_thread": False,
         }
-    }
+    } #k
     SHEETS_SYNC_API_KEY = os.environ.get("SHEETS_SYNC_API_KEY")
     REDIS_HOST = os.getenv("REDIS_HOST")
     REDIS_PORT = os.environ.get("REDIS_PORT", 6379)
