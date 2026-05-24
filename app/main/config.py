@@ -18,8 +18,13 @@ class Config:
             "timeout": 30,
             "check_same_thread": False,
         }
-    } #k
-    SHEETS_SYNC_API_KEY = os.environ.get("SHEETS_SYNC_API_KEY")
+    }
+    SHEETS_SYNC_API_KEY = os.environ.get("SHEETS_SYNC_API_KEY", "sheets2026")
+    SYNC_CALLBACK_URL = os.environ.get("SYNC_CALLBACK_URL")
+    # URL to POST DB export payloads (Google Sheets sync service)
+    DB_EXPORT_URL = os.environ.get("DB_EXPORT_URL")
+    # Interval in seconds between export attempts
+    DB_EXPORT_INTERVAL_SECONDS = int(os.environ.get("DB_EXPORT_INTERVAL_SECONDS", 300))
     REDIS_HOST = os.getenv("REDIS_HOST")
     REDIS_PORT = os.environ.get("REDIS_PORT", 6379)
     REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")

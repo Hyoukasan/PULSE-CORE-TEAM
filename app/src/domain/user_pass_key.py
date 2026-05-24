@@ -8,3 +8,5 @@ class UserPassKey(db.Model):
     id: so.Mapped[int] = so.mapped_column(primary_key=True)
     user_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("users.id"), unique=True, nullable=False)
     pass_key: so.Mapped[str] = so.mapped_column(sa.String(128), unique=True, nullable=False)
+
+    user: so.Mapped["User"] = so.relationship("User", back_populates="user_pass_key")

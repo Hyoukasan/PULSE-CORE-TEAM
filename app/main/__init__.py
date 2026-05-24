@@ -21,7 +21,36 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(v1.groups.bp)
     app.register_blueprint(v1.messages.bp)
     app.register_blueprint(v1.users.bp)
+    app.register_blueprint(v1.bans.bp)
     app.register_blueprint(v1.arduino.bp)
+    app.register_blueprint(v1.queue.bp)
+    app.register_blueprint(v1.tasks.bp)
+    app.register_blueprint(v1.google.bp)
+    from app.api.v1.sync import bp as sync_bp
+    app.register_blueprint(sync_bp)
+
+
+def seed_roles() -> int:
+    """Insert base roles if they do not exist."""
+    from app.src.domain.role import Role
+
+    base_roles = (
+        "admin",
+        "practitioner",
+        "listener",
+    )
+    created_count = 0
+
+    for role_name in base_roles:
+        exists = db.session.execute(
+            db.select(Role).where(Role.role == role_name)
+        ).scalar_one_or_none()
+        if exists is None:
+            db.session.add(Role(role=role_name))
+            created_count += 1
+
+    db.session.commit()
+    return created_count
 
 
 def register_cli(app: Flask) -> None:
@@ -68,32 +97,10 @@ def register_cli(app: Flask) -> None:
         click.echo("DB reset (drop_all + create_all) and seeded base roles.")
 
     @app.cli.command("seed-roles")
-    def seed_roles() -> None:
+    def cli_seed_roles() -> None:
         """Insert base roles if they do not exist."""
-        from app.src.domain.role import Role
-
-        base_roles = (
-            "admin",
-            "student",
-            "student_lecture",
-            "practitioner",
-            "listener",
-            "professor",
-        )
-        created_count = 0
-
-        with app.app_context():
-            for role_name in base_roles:
-                exists = db.session.execute(
-                    db.select(Role).where(Role.role == role_name)
-                ).scalar_one_or_none()
-                if exists is None:
-                    db.session.add(Role(role=role_name))
-                    created_count += 1
-
-            db.session.commit()
-
-        click.echo(f"Roles seeded. Created: {created_count}, total expected: {len(base_roles)}.")
+        created_count = seed_roles()
+        click.echo(f"Roles seeded. Created: {created_count}, total expected: 3.")
 
     @app.cli.command("db-smoke")
     def db_smoke() -> None:
@@ -107,28 +114,28 @@ def register_cli(app: Flask) -> None:
         suffix = int(datetime.now(timezone.utc).timestamp())
 
         with app.app_context():
-            student_role = db.session.execute(
-                db.select(Role).where(Role.role == "student")
+            practitioner_role = db.session.execute(
+                db.select(Role).where(Role.role == "practitioner")
             ).scalar_one_or_none()
-            professor_role = db.session.execute(
-                db.select(Role).where(Role.role == "professor")
+            admin_role = db.session.execute(
+                db.select(Role).where(Role.role == "admin")
             ).scalar_one_or_none()
 
-            if student_role is None or professor_role is None:
+            if practitioner_role is None or admin_role is None:
                 click.echo("Missing required roles. Run `flask --app pulse_project seed-roles` first.")
                 return
 
             student_user = User(
-                username=f"smoke_student_{suffix}",
-                email=f"smoke_student_{suffix}@local.test",
-                role_id=student_role.id,
+                username=f"smoke_practitioner_{suffix}",
+                email=f"smoke_practitioner_{suffix}@local.test",
+                role_id=practitioner_role.id,
             )
             student_user.set_password("smoke-pass")
 
             professor_user = User(
-                username=f"smoke_professor_{suffix}",
-                email=f"smoke_professor_{suffix}@local.test",
-                role_id=professor_role.id,
+                username=f"smoke_admin_{suffix}",
+                email=f"smoke_admin_{suffix}@local.test",
+                role_id=admin_role.id,
             )
             professor_user.set_password("smoke-pass")
 
@@ -191,14 +198,14 @@ def register_cli(app: Flask) -> None:
         yarchenko_email = "yarchenko.da@edu.spbstu.ru"
 
         with app.app_context():
-            student_role = db.session.execute(
-                db.select(Role).where(Role.role == "student")
+            practitioner_role = db.session.execute(
+                db.select(Role).where(Role.role == "practitioner")
             ).scalar_one_or_none()
-            professor_role = db.session.execute(
-                db.select(Role).where(Role.role == "professor")
+            admin_role = db.session.execute(
+                db.select(Role).where(Role.role == "admin")
             ).scalar_one_or_none()
 
-            if student_role is None or professor_role is None:
+            if practitioner_role is None or admin_role is None:
                 click.echo("Missing roles. Run: flask --app pulse_project seed-roles")
                 return
 
@@ -232,7 +239,7 @@ def register_cli(app: Flask) -> None:
                     click.echo("Demo data already present (nothing to do).")
                     click.echo(f"  group id={group.id} number={group.number}")
                     click.echo(f"  student user id={student_user.id} email={student_email}")
-                    click.echo(f"  professor user id={professor_user.id} email={professor_email}")
+                    click.echo(f"  admin user id={professor_user.id} email={professor_email}")
                     click.echo(f"  yarchenko user id={yarchenko_user.id} email={yarchenko_email}")
                     click.echo(f"  password (unchanged): {demo_password}")
                     return
@@ -244,9 +251,9 @@ def register_cli(app: Flask) -> None:
 
             if student_user is None:
                 student_user = User(
-                    username="demo_student",
+                    username="demo_practitioner",
                     email=student_email,
-                    role_id=student_role.id,
+                    role_id=practitioner_role.id,
                 )
                 student_user.set_password(demo_password)
                 db.session.add(student_user)
@@ -254,9 +261,9 @@ def register_cli(app: Flask) -> None:
 
             if professor_user is None:
                 professor_user = User(
-                    username="demo_professor",
+                    username="demo_admin",
                     email=professor_email,
-                    role_id=professor_role.id,
+                    role_id=admin_role.id,
                 )
                 professor_user.set_password(demo_password)
                 db.session.add(professor_user)
@@ -267,7 +274,7 @@ def register_cli(app: Flask) -> None:
                     username="yarchenko.da",
                     email=yarchenko_email,
                     fullname="Yarchenko DA",
-                    role_id=student_role.id,
+                    role_id=practitioner_role.id,
                 )
                 yarchenko_user.set_password(demo_password)
                 db.session.add(yarchenko_user)
@@ -290,7 +297,7 @@ def register_cli(app: Flask) -> None:
         click.echo("Demo data seeded.")
         click.echo(f"  group: id={gid} number={gnum} name={gname}")
         click.echo(f"  student: id={sid} username=demo_student email={student_email}")
-        click.echo(f"  professor: id={pid} username=demo_professor email={professor_email}")
+        click.echo(f"  admin: id={pid} username=demo_admin email={professor_email}")
         click.echo(f"  yarchenko: id={yid} username=yarchenko.da email={yarchenko_email}")
         click.echo(f"  password for all demo users: {demo_password}")
 
@@ -301,9 +308,17 @@ def create_app(config_name="default"):
     app.config.from_object(config[config_name])
 
     db.init_app(app)
+    from app.src.integrations.db_hooks import register_db_listeners
+    register_db_listeners(app)
     init_redis(app)
     register_blueprints(app)
     register_cli(app)
+
+    with app.app_context():
+        db.create_all()
+        from app.src.integrations.schema_migrations import apply_sqlite_schema_patches
+        apply_sqlite_schema_patches()
+        seed_roles()
 
     # Загрузить публичный ключ для Arduino
     from app.api.v1.arduino import load_public_key
@@ -311,6 +326,14 @@ def create_app(config_name="default"):
 
     swagger = Swagger(app=app, title='PulseCore')
     swagger.configure()
+
+    # Start background DB export worker (posts snapshot to configured URL)
+    try:
+        from app.src.integrations.exporter import start_db_export_worker
+
+        start_db_export_worker(app)
+    except Exception:
+        app.logger.exception("Failed to start DB export worker")
 
     return app
 

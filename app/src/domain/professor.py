@@ -13,4 +13,8 @@ class Professor(db.Model):
 
     user: so.Mapped["User"] = so.relationship(back_populates="professor_profile")
     group: so.Mapped["Group"] = so.relationship(back_populates="professors")
+    approach_queues: so.Mapped[list["ApproachQueue"]] = so.relationship(
+        back_populates="professor",
+        cascade="all, delete-orphan",
+    )
 

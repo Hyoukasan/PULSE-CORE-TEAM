@@ -4,28 +4,11 @@ from flask import Blueprint, current_app, jsonify, request
 
 from app.src.core.schemas import (
     AssignUserToGroupInput,
-    AuthLoginInput,
-    AttendanceExcuseInput,
-    AttendancePassInput,
-    MessagePayload,
-    MessageSenderInput,
-    RegisterUserInput,
-    SendMessageInput,
     SheetGroupRow,
-    BotAuthInput,
 )
 from app.src.core.services import (
     assign_user_to_group,
-    authenticate_user,
-    check_attendance_pass,
-    get_user_by_email,
-    get_user_by_id,
-    register_user,
-    send_message,
-    serialize_user_info,
-    submit_attendance_excuse,
     sync_groups_from_sheet,
-    bot_authenticate,
 )
 
 bp = Blueprint("groups_v1", __name__, url_prefix="/api/v1/groups")

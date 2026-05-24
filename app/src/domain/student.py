@@ -13,7 +13,7 @@ class Student(db.Model):
     __tablename__ = "students"
 
     id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("users.id"), primary_key=True)
-    group_id: so.Mapped[int] = so.mapped_column(ForeignKey("groups.id"), nullable=False)
+    group_id: so.Mapped[Optional[int]] = so.mapped_column(ForeignKey("groups.id"), nullable=True)
     pass_id: so.Mapped[Optional[str]] = so.mapped_column(sa.String(64), unique=True, nullable=True)
     missed_passes: so.Mapped[int] = so.mapped_column(sa.Integer, nullable=False, default=0)
 
@@ -23,5 +23,17 @@ class Student(db.Model):
         back_populates="student",
         cascade="all, delete-orphan",
         lazy="joined",
+    )
+    approach_queues: so.Mapped[list["ApproachQueue"]] = so.relationship(
+        back_populates="student",
+        cascade="all, delete-orphan",
+    )
+    lab_scores: so.Mapped[list["StudentLabScore"]] = so.relationship(
+        back_populates="student",
+        cascade="all, delete-orphan",
+    )
+    task_responses: so.Mapped[list["TaskResponse"]] = so.relationship(
+        back_populates="student",
+        cascade="all, delete-orphan",
     )
 
