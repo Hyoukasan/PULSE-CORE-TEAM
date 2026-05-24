@@ -6,5 +6,7 @@ from . import messages
 from . import users
 from . import arduino
 from . import queue
+from . import tasks
 from . import google
 from . import sync
+from . import bans

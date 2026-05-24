@@ -5,6 +5,7 @@ import requests
 
 from flask import current_app
 
+from app.src.integrations.db import db
 from app.src.core.services import (
     export_users_for_sheet,
     export_groups_for_sheet,
@@ -19,18 +20,20 @@ def _export_once(app) -> None:
             app.logger.debug("DB_EXPORT_URL not configured; skipping export.")
             return
 
-        payload = {
-            "users": export_users_for_sheet(),
-            "groups": export_groups_for_sheet(),
-            "attendance": export_attendance_for_sheet(),
-            "timestamp": int(time.time()),
-        }
-
         try:
+            payload = {
+                "users": export_users_for_sheet(),
+                "groups": export_groups_for_sheet(),
+                "attendance": export_attendance_for_sheet(),
+                "timestamp": int(time.time()),
+            }
+
             resp = requests.post(export_url, json=payload, timeout=30)
             app.logger.info(f"DB export posted: status={resp.status_code}")
         except Exception as e:
             app.logger.error(f"Failed to post DB export: {e}\n{traceback.format_exc()}")
+        finally:
+            db.session.remove()
 
 
 def _worker_loop(app, interval_seconds: int) -> None:

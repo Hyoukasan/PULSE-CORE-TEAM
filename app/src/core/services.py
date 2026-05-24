@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import Iterable
 
+import sqlalchemy.orm as so
+
 from app.src.integrations.db import db
 from app.src.domain.attendance_excuse import AttendanceExcuse
 from app.src.domain.attendance_record import AttendanceRecord
@@ -12,6 +14,8 @@ from app.src.domain.role import Role
 from app.src.domain.student import Student
 from app.src.domain.user import User
 from app.src.domain.user_pass_key import UserPassKey
+from app.src.domain.student_lab_score import StudentLabScore
+from app.src.domain.task import Task, TaskResponse
 
 from .schemas import (
     AddToQueueBotInput,
@@ -31,6 +35,8 @@ from .schemas import (
     SheetGroupRow,
     SheetUserRow,
     SheetAttendanceRow,
+    CreateTaskInput,
+    SubmitTaskResponseInput,
 )
 from .validators import determine_user_role_from_email
 
@@ -163,6 +169,151 @@ def set_user_ban(user: User, ban: bool, ban_expires_at: str | None = None) -> No
         raise ValueError("ban_expires_at must be ISO 8601 string or null") from error
 
 
+def is_user_currently_banned(user: User) -> bool:
+    if user.ban_expires_at is None:
+        return False
+    return user.ban_expires_at > datetime.utcnow()
+
+
+def banned_status_response() -> dict:
+    return {"status": "banned"}
+
+
+def _resolve_user_ref(
+    data: dict,
+    *,
+    user_id_keys: tuple[str, ...] = ("user_id",),
+    telegram_id_keys: tuple[str, ...] = ("telegram_id",),
+    vk_id_keys: tuple[str, ...] = ("vk_id",),
+    email_keys: tuple[str, ...] = ("email",),
+    fallback_system_id_for_vk: bool = False,
+) -> User | None:
+    # Сначала проверяем system ID (приоритет выше)
+    for key in user_id_keys:
+        if data.get(key) is not None:
+            user = get_user_by_id(int(data[key]))
+            if user is not None:
+                return user
+    # Потом telegram_id
+    for key in telegram_id_keys:
+        if data.get(key) is not None:
+            user = get_user_by_telegram_id(int(data[key]))
+            if user is not None:
+                return user
+    # Потом vk_id
+    vk_value = None
+    for key in vk_id_keys:
+        if data.get(key) is not None:
+            vk_value = int(data[key])
+            user = get_user_by_vk_id(vk_value)
+            if user is not None:
+                return user
+    # Если нет пользователя по vk_id, можно попробовать system id с тем же значением
+    if fallback_system_id_for_vk and vk_value is not None:
+        user = get_user_by_id(vk_value)
+        if user is not None:
+            return user
+    # И в конце email
+    for key in email_keys:
+        if data.get(key) is not None:
+            user = get_user_by_email(str(data[key]))
+            if user is not None:
+                return user
+    return None
+
+
+def resolve_admin_from_request(data: dict) -> User:
+    from_block = data.get("from") or {}
+    admin = _resolve_user_ref(
+        from_block,
+        user_id_keys=("id", "user_id", "admin_id"),
+        telegram_id_keys=("telegram_id", "admin_telegram_id"),
+        vk_id_keys=("vk_id", "admin_vk_id"),
+        email_keys=("email", "admin_email"),
+        fallback_system_id_for_vk=True,
+    )
+    if admin is None:
+        admin = _resolve_user_ref(
+            data,
+            user_id_keys=("admin_id", "user_id", "id"),
+            telegram_id_keys=("admin_telegram_id", "telegram_id"),
+            vk_id_keys=("admin_vk_id", "vk_id"),
+            email_keys=("admin_email", "email"),
+            fallback_system_id_for_vk=True,
+        )
+    if admin is None:
+        raise ValueError(
+            "Admin identifier required: from.id, from.user_id, from.telegram_id, from.vk_id "
+            "or admin_id / admin_telegram_id / admin_vk_id."
+        )
+    if admin.role.role != "admin":
+        raise ValueError("Only admin can manage bans.")
+    return admin
+
+
+def resolve_ban_target_from_request(data: dict) -> User:
+    target_block = data.get("target") or {}
+    target = _resolve_user_ref(
+        target_block,
+        user_id_keys=("id", "user_id", "target_user_id"),
+        telegram_id_keys=("telegram_id", "target_telegram_id"),
+        vk_id_keys=("vk_id", "target_vk_id"),
+        email_keys=("email", "target_email"),
+        fallback_system_id_for_vk=True,
+    )
+    if target is None:
+        target = _resolve_user_ref(
+            data,
+            user_id_keys=("target_user_id", "user_id", "id"),
+            telegram_id_keys=("target_telegram_id", "telegram_id"),
+            vk_id_keys=("target_vk_id", "vk_id"),
+            email_keys=("target_email", "email"),
+            fallback_system_id_for_vk=True,
+        )
+    if target is None:
+        raise ValueError(
+            "Target user required: target.id, target.user_id, target.telegram_id, target.vk_id, target.email "
+            "or target_user_id / target_telegram_id / target_vk_id."
+        )
+    return target
+
+
+def ban_user_as_admin(admin: User, target: User, ban_expires_at: str | None = None, permanent: bool = False) -> User:
+    if admin.role.role != "admin":
+        raise ValueError("Only admin can ban users.")
+    if target.role.role == "admin":
+        raise ValueError("Cannot ban admin users.")
+    if permanent or ban_expires_at is None:
+        set_user_ban(target, True, None)
+    else:
+        set_user_ban(target, True, ban_expires_at)
+    db.session.commit()
+    return target
+
+
+def unban_user_as_admin(admin: User, target: User) -> User:
+    if admin.role.role != "admin":
+        raise ValueError("Only admin can unban users.")
+    set_user_ban(target, False)
+    db.session.commit()
+    return target
+
+
+def list_banned_users() -> list[dict]:
+    now = datetime.utcnow()
+    users = db.session.execute(
+        db.select(User).where(User.ban_expires_at.isnot(None), User.ban_expires_at > now)
+    ).scalars().all()
+
+    result = []
+    for user in users:
+        row = serialize_user_info(user)
+        row["ban_expires_at"] = user.ban_expires_at.isoformat() if user.ban_expires_at else None
+        row["is_banned"] = True
+        result.append(row)
+    return result
+
+
 def get_user_by_telegram_id(telegram_id: int) -> User | None:
     return db.session.execute(
         db.select(User).where(User.telegram_id == telegram_id)
@@ -206,13 +357,17 @@ def get_user_by_system_or_bot_id(user_id: int) -> User | None:
 
 
 def get_admin_user() -> User | None:
+    """Return a single admin user (lowest id) when several exist in DB."""
     role = db.session.execute(
         db.select(Role).where(Role.role == "admin")
     ).scalar_one_or_none()
     if role is None:
         return None
     return db.session.execute(
-        db.select(User).where(User.role_id == role.id)
+        db.select(User)
+        .where(User.role_id == role.id)
+        .order_by(User.id)
+        .limit(1)
     ).scalar_one_or_none()
 
 
@@ -326,16 +481,23 @@ def get_message_recipient(
     raise ValueError("Only practitioner, listener, and admin can send messages.")
 
 
-def send_message(payload: SendMessageInput) -> Message:
+def _resolve_message_sender(sender_input: MessageSenderInput) -> User | None:
     sender = None
-    if payload.sender.user_id is not None:
-        sender = get_user_by_system_or_bot_id(payload.sender.user_id)
-    if sender is None and payload.sender.telegram_id is not None:
-        sender = get_user_by_telegram_id(payload.sender.telegram_id)
-    if sender is None and payload.sender.vk_id is not None:
-        sender = get_user_by_vk_id(payload.sender.vk_id)
+    if sender_input.user_id is not None:
+        sender = get_user_by_system_or_bot_id(sender_input.user_id)
+    if sender is None and sender_input.telegram_id is not None:
+        sender = get_user_by_telegram_id(sender_input.telegram_id)
+    if sender is None and sender_input.vk_id is not None:
+        sender = get_user_by_vk_id(sender_input.vk_id)
+    return sender
+
+
+def send_message(payload: SendMessageInput) -> Message:
+    sender = _resolve_message_sender(payload.sender)
     if sender is None:
         raise ValueError("Sender not found.")
+
+    ensure_user_not_banned(sender)
 
     recipient = get_message_recipient(
         sender,
@@ -370,9 +532,7 @@ def send_broadcast(payload: SendMessageInput) -> dict:
     if payload.to_group_number is None:
         raise ValueError("to_group_number is required for broadcast")
 
-    sender = None
-    if payload.sender.user_id is not None:
-        sender = get_user_by_system_or_bot_id(payload.sender.user_id)
+    sender = _resolve_message_sender(payload.sender)
     if sender is None:
         raise ValueError("Sender not found.")
 
@@ -392,17 +552,20 @@ def send_broadcast(payload: SendMessageInput) -> dict:
         user = db.session.get(User, student_id)
         if user is None:
             continue
-        # Avoid duplicates by external_id
-        if external_id:
-            exists = db.session.execute(db.select(Message).where(Message.external_id == external_id, Message.recipient_id == user.id)).scalar_one_or_none()
+        per_recipient_external_id = None
+        if external_id is not None:
+            per_recipient_external_id = f"{external_id}:{user.id}"
+            exists = db.session.execute(
+                db.select(Message).where(Message.external_id == per_recipient_external_id)
+            ).scalar_one_or_none()
             if exists is not None:
                 continue
 
         message = Message(
             sender_id=sender.id,
             recipient_id=user.id,
-            external_id=external_id,
-            message_type=payload.message.type or "text",
+            external_id=per_recipient_external_id,
+            message_type="broadcast",
             text=payload.message.text,
         )
         db.session.add(message)
@@ -410,6 +573,106 @@ def send_broadcast(payload: SendMessageInput) -> dict:
 
     db.session.commit()
     return {"created": created}
+
+
+def _normalize_broadcast_platform(platform: str) -> str:
+    normalized = platform.strip().lower()
+    if normalized in {"telegram", "tg"}:
+        return "telegram"
+    if normalized in {"vk", "vkontakte"}:
+        return "vk"
+    raise ValueError("platform must be 'telegram' or 'vk'.")
+
+
+def poll_broadcast_messages_for_platform(platform: str) -> dict:
+    """
+    Return pending broadcast messages deliverable on the given bot platform.
+
+    Only recipients with telegram_id (platform=telegram) or vk_id (platform=vk)
+    are included. Marks those rows as message_type=used_broadcast.
+    """
+    platform = _normalize_broadcast_platform(platform)
+
+    recipient_join = so.joinedload(Message.recipient)
+    if platform == "telegram":
+        pending = db.session.execute(
+            db.select(Message)
+            .join(Message.recipient)
+            .where(
+                Message.message_type == "broadcast",
+                User.telegram_id.isnot(None),
+            )
+            .options(recipient_join)
+        ).scalars().all()
+    else:
+        pending = db.session.execute(
+            db.select(Message)
+            .join(Message.recipient)
+            .where(
+                Message.message_type == "broadcast",
+                User.vk_id.isnot(None),
+            )
+            .options(recipient_join)
+        ).scalars().all()
+
+    grouped: dict[tuple[int, str, datetime], dict] = {}
+
+    for message in pending:
+        recipient = message.recipient
+        if recipient is None:
+            continue
+
+        bot_id = recipient.telegram_id if platform == "telegram" else recipient.vk_id
+        if bot_id is None:
+            continue
+
+        created_key = message.created_at.replace(microsecond=0)
+        group_key = (message.sender_id, message.text, created_key)
+        bucket = grouped.setdefault(
+            group_key,
+            {
+                "text": message.text,
+                "recipient_bot_ids": [],
+                "recipients": [],
+                "message_ids": [],
+            },
+        )
+        bucket["recipient_bot_ids"].append(bot_id)
+        bucket["message_ids"].append(message.id)
+
+        recipient_payload = serialize_user_for_platform(recipient, platform)
+        if recipient_payload is not None:
+            bucket["recipients"].append(recipient_payload)
+
+    broadcasts = []
+    delivered_message_ids: list[int] = []
+
+    for bucket in grouped.values():
+        bucket["recipient_bot_ids"] = sorted(set(bucket["recipient_bot_ids"]))
+        seen_user_ids: set[int] = set()
+        unique_recipients: list[dict] = []
+        for recipient in bucket["recipients"]:
+            user_id = recipient["id"]
+            if user_id in seen_user_ids:
+                continue
+            seen_user_ids.add(user_id)
+            unique_recipients.append(recipient)
+        bucket["recipients"] = unique_recipients
+        broadcasts.append(bucket)
+        delivered_message_ids.extend(bucket["message_ids"])
+
+    for message_id in delivered_message_ids:
+        row = db.session.get(Message, message_id)
+        if row is not None:
+            row.message_type = "used_broadcast"
+
+    db.session.commit()
+
+    return {
+        "platform": platform,
+        "broadcasts": broadcasts,
+        "deliveries": sum(len(item["recipient_bot_ids"]) for item in broadcasts),
+    }
 
 
 def serialize_message(message: Message) -> dict:
@@ -493,6 +756,20 @@ def serialize_user_info(user: User) -> dict:
         "telegram_id": user.telegram_id,
         "vk_id": user.vk_id,
     }
+
+
+def serialize_user_for_platform(user: User, platform: str) -> dict:
+    """User payload for bot delivery: only the messenger id for the requested platform."""
+    info = serialize_user_info(user)
+    if platform == "telegram":
+        info.pop("vk_id", None)
+        if info.get("telegram_id") is None:
+            return None
+    else:
+        info.pop("telegram_id", None)
+        if info.get("vk_id") is None:
+            return None
+    return info
 
 
 def get_all_students() -> list[dict]:
@@ -773,12 +1050,6 @@ def bot_authenticate(payload: BotAuthInput) -> str:
             if not user.verify_password(payload.password):
                 return "wrong_password"
 
-            # Check ban status for existing user
-            try:
-                ensure_user_not_banned(user)
-            except ValueError:
-                return "banned"
-
             if payload.telegram_id is not None:
                 existing_user_by_telegram = get_user_by_telegram_id(payload.telegram_id)
                 if existing_user_by_telegram is not None and existing_user_by_telegram.id != user.id:
@@ -838,12 +1109,6 @@ def bot_authenticate(payload: BotAuthInput) -> str:
 
         if not user.verify_password(payload.password):
             return "wrong_password"
-
-        # Check ban status for existing user
-        try:
-            ensure_user_not_banned(user)
-        except ValueError:
-            return "banned"
 
         if payload.telegram_id is not None and user.telegram_id is not None and user.telegram_id != payload.telegram_id:
             return "user_exist"
@@ -987,6 +1252,39 @@ def export_attendance_for_sheet() -> list[dict]:
 # Approach Queue Management Functions
 # ============================================================================
 
+def _recalculate_queue_positions(professor_id: int, lesson_date: datetime) -> None:
+    """
+    Пересчитать позиции в очереди на основе количества сданных лаб.
+    Студенты с большим количеством сданных лаб получают меньший номер позиции.
+    """
+    queue_entries = db.session.execute(
+        db.select(ApproachQueue).where(
+            (ApproachQueue.professor_id == professor_id) &
+            (ApproachQueue.lesson_date == lesson_date) &
+            (ApproachQueue.status == "pending")
+        )
+    ).scalars().all()
+    
+    # Для каждого студента вычислить количество сданных лаб
+    entries_with_scores = []
+    for entry in queue_entries:
+        lab_count = db.session.execute(
+            db.select(db.func.count(StudentLabScore.id)).where(
+                (StudentLabScore.student_id == entry.student_id) &
+                (StudentLabScore.score.isnot(None)) &
+                (StudentLabScore.score > 0)
+            )
+        ).scalar() or 0
+        entries_with_scores.append((entry, lab_count))
+    
+    # Отсортировать по количеству лаб (по убыванию), затем по времени добавления в очередь
+    entries_with_scores.sort(key=lambda x: (-x[1], x[0].created_at))
+    
+    # Обновить позиции
+    for idx, (entry, lab_count) in enumerate(entries_with_scores, start=1):
+        entry.position = idx
+
+
 def add_to_queue(payload) -> dict:
     """
     Добавить студента в очередь на занятие.
@@ -994,7 +1292,7 @@ def add_to_queue(payload) -> dict:
     Правила:
     - Студент должен быть с ролью 'practitioner'
     - Студент может быть только в одной очереди на одно занятие у одного преподавателя
-    - Позиция автоматически рассчитывается как (макс позиция + 1)
+    - Позиция автоматически рассчитывается на основе количества сданных лаб
     """
     payload = AddToQueueInput(
         student_id=payload.get("student_id"),
@@ -1017,6 +1315,9 @@ def add_to_queue(payload) -> dict:
     
     if student.user.role.role != "practitioner":
         raise ValueError("Only practitioners can join the queue.")
+
+    if is_user_currently_banned(student.user):
+        return banned_status_response()
     
     # Проверить, что преподаватель существует
     professor = db.session.get(Professor, payload.professor_id)
@@ -1036,25 +1337,20 @@ def add_to_queue(payload) -> dict:
     if existing is not None:
         raise ValueError("Student is already in the queue for this lesson.")
     
-    # Получить максимальную позицию в очереди
-    max_position = db.session.execute(
-        db.select(db.func.max(ApproachQueue.position)).where(
-            (ApproachQueue.professor_id == payload.professor_id) &
-            (ApproachQueue.lesson_date == payload.lesson_date) &
-            (ApproachQueue.status == "pending")
-        )
-    ).scalar() or 0
-    
     # Создать новую запись в очереди
     queue_entry = ApproachQueue(
         student_id=payload.student_id,
         professor_id=payload.professor_id,
         lesson_date=payload.lesson_date,
-        position=max_position + 1,
+        position=1,  # Временная позиция, будет пересчитана ниже
         status="pending",
         labs_count=payload.labs_count,
     )
     db.session.add(queue_entry)
+    db.session.flush()
+    
+    # Пересчитать позиции для всей очереди (включая только что добавленного студента)
+    _recalculate_queue_positions(payload.professor_id, payload.lesson_date)
     db.session.commit()
     
     return {
@@ -1095,6 +1391,8 @@ def remove_from_queue_by_bot(payload) -> dict:
     )
     
     student = _resolve_student_by_bot_ids(payload.telegram_id, payload.vk_id)
+    if is_user_currently_banned(student.user):
+        return banned_status_response()
     professor = _resolve_professor_for_student(student)
     lesson_date = _parse_lesson_date(payload.lesson_date)
     
@@ -1114,6 +1412,8 @@ def get_queue_position_by_bot(payload) -> dict:
     )
     
     student = _resolve_student_by_bot_ids(payload.telegram_id, payload.vk_id)
+    if is_user_currently_banned(student.user):
+        return banned_status_response()
     professor = _resolve_professor_for_student(student)
     lesson_date = _parse_lesson_date(payload.lesson_date)
     
@@ -1149,23 +1449,11 @@ def remove_from_queue(payload) -> dict:
     if queue_entry is None:
         raise ValueError("Student is not in the queue for this lesson.")
     
-    removed_position = queue_entry.position
     db.session.delete(queue_entry)
     db.session.flush()
     
-    # Переиндексировать позиции для оставшихся студентов
-    remaining_entries = db.session.execute(
-        db.select(ApproachQueue).where(
-            (ApproachQueue.professor_id == payload.professor_id) &
-            (ApproachQueue.lesson_date == payload.lesson_date) &
-            (ApproachQueue.status == "pending") &
-            (ApproachQueue.position > removed_position)
-        ).order_by(ApproachQueue.position)
-    ).scalars().all()
-    
-    for entry in remaining_entries:
-        entry.position -= 1
-    
+    # Пересчитать позиции для оставшихся студентов
+    _recalculate_queue_positions(payload.professor_id, payload.lesson_date)
     db.session.commit()
     
     return {
@@ -1308,4 +1596,185 @@ def get_students_by_group_id(group_id: int) -> dict:
         "group_number": group.number,
         "group_name": group.name,
         "user_ids": user_ids,
+    }
+
+
+# ============================================================================
+# Task Management Functions
+# ============================================================================
+
+def create_task(payload, created_by_id: int) -> dict:
+    """
+    Создать новое задание для группы.
+    
+    Параметры:
+    - payload: CreateTaskInput с данными задания
+    - created_by_id: ID пользователя, создающего задание
+    """
+    from app.src.domain.task import Task
+    
+    # Проверить, что группа существует
+    group = db.session.get(Group, payload.group_id)
+    if group is None:
+        raise ValueError("Group not found.")
+    
+    # Создать новое задание
+    task = Task(
+        group_id=payload.group_id,
+        created_by_id=created_by_id,
+        title=payload.title,
+        description=payload.description,
+        file_url=payload.file_url,
+        due_date=payload.due_date,
+    )
+    db.session.add(task)
+    db.session.commit()
+    
+    return {
+        "status": "success",
+        "task_id": task.id,
+        "title": task.title,
+        "group_id": task.group_id,
+        "message": "Task created successfully"
+    }
+
+
+def get_student_tasks(telegram_id: int = None, vk_id: int = None) -> dict:
+    """
+    Получить список заданий для студента.
+    
+    Студент ищется по telegram_id или vk_id.
+    """
+    # Найти студента
+    student = _resolve_student_by_bot_ids(telegram_id, vk_id)
+    
+    if student.group_id is None:
+        return {
+            "status": "success",
+            "tasks": [],
+            "message": "Student has no group"
+        }
+    
+    # Получить все задания для группы студента
+    tasks = db.session.execute(
+        db.select(Task).where(Task.group_id == student.group_id).order_by(Task.created_at.desc())
+    ).scalars().all()
+    
+    task_list = []
+    for task in tasks:
+        # Проверить, есть ли уже ответ от этого студента
+        student_response = db.session.execute(
+            db.select(TaskResponse).where(
+                (TaskResponse.task_id == task.id) &
+                (TaskResponse.student_id == student.id)
+            )
+        ).scalar_one_or_none()
+        
+        task_list.append({
+            "id": task.id,
+            "title": task.title,
+            "description": task.description,
+            "file_url": task.file_url,
+            "due_date": task.due_date.isoformat() if task.due_date else None,
+            "created_at": task.created_at.isoformat(),
+            "submitted": student_response is not None,
+        })
+    
+    return {
+        "status": "success",
+        "tasks": task_list,
+        "count": len(task_list)
+    }
+
+
+def submit_task_response(payload) -> dict:
+    """
+    Отправить ответ на задание.
+    """
+    from app.src.domain.task import TaskResponse
+    
+    # Найти студента
+    student = _resolve_student_by_bot_ids(payload.telegram_id, payload.vk_id)
+    
+    # Проверить, что задание существует
+    task = db.session.get(Task, payload.task_id)
+    if task is None:
+        raise ValueError("Task not found.")
+    
+    # Проверить, что студент в группе, к которой назначено задание
+    if student.group_id != task.group_id:
+        raise ValueError("Student does not have access to this task.")
+    
+    # Проверить, есть ли уже ответ от этого студента
+    existing_response = db.session.execute(
+        db.select(TaskResponse).where(
+            (TaskResponse.task_id == payload.task_id) &
+            (TaskResponse.student_id == student.id)
+        )
+    ).scalar_one_or_none()
+    
+    if existing_response:
+        # Обновить существующий ответ
+        existing_response.response_text = payload.response_text
+        existing_response.file_url = payload.file_url
+        existing_response.submitted_at = datetime.utcnow()
+        db.session.commit()
+        return {
+            "status": "success",
+            "response_id": existing_response.id,
+            "message": "Response updated successfully"
+        }
+    else:
+        # Создать новый ответ
+        response = TaskResponse(
+            task_id=payload.task_id,
+            student_id=student.id,
+            response_text=payload.response_text,
+            file_url=payload.file_url,
+        )
+        db.session.add(response)
+        db.session.commit()
+        return {
+            "status": "success",
+            "response_id": response.id,
+            "message": "Response submitted successfully"
+        }
+
+
+def get_task_responses(task_id: int) -> dict:
+    """
+    Получить все ответы на задание.
+    """
+    # Проверить, что задание существует
+    task = db.session.get(Task, task_id)
+    if task is None:
+        raise ValueError("Task not found.")
+    
+    # Получить все ответы
+    responses = db.session.execute(
+        db.select(TaskResponse).where(TaskResponse.task_id == task_id).order_by(TaskResponse.submitted_at.desc())
+    ).scalars().all()
+    
+    response_list = []
+    for resp in responses:
+        response_list.append({
+            "id": resp.id,
+            "student_id": resp.student_id,
+            "student_email": resp.student.user.email,
+            "student_fullname": resp.student.user.fullname,
+            "response_text": resp.response_text,
+            "file_url": resp.file_url,
+            "score": resp.score,
+            "feedback": resp.feedback,
+            "status": resp.status,
+            "submitted_at": resp.submitted_at.isoformat(),
+            "graded_at": resp.graded_at.isoformat() if resp.graded_at else None,
+        })
+    
+    return {
+        "status": "success",
+        "task_id": task_id,
+        "task_title": task.title,
+        "responses": response_list,
+        "response_count": len(response_list)
     }

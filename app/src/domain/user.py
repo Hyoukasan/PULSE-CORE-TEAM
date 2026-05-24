@@ -39,6 +39,10 @@ class User(db.Model):
         back_populates="user",
         uselist=False,
     )
+    created_tasks: so.Mapped[list["Task"]] = so.relationship(
+        back_populates="created_by",
+        cascade="all, delete-orphan",
+    )
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)

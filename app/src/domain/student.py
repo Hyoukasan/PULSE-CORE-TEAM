@@ -28,4 +28,12 @@ class Student(db.Model):
         back_populates="student",
         cascade="all, delete-orphan",
     )
+    lab_scores: so.Mapped[list["StudentLabScore"]] = so.relationship(
+        back_populates="student",
+        cascade="all, delete-orphan",
+    )
+    task_responses: so.Mapped[list["TaskResponse"]] = so.relationship(
+        back_populates="student",
+        cascade="all, delete-orphan",
+    )
 

@@ -47,6 +47,8 @@ def add_to_queue_route() -> tuple:
             result = add_to_queue(data)
         else:
             result = add_to_queue_by_bot(data)
+        if result.get("status") == "banned":
+            return jsonify(result), 200
         return jsonify(result), 201
     except ValueError as error:
         return jsonify({"error": str(error)}), 400

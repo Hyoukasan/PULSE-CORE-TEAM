@@ -33,6 +33,7 @@ from app.src.core.services import (
     get_messages_for_bot_user,
     get_all_groups,
     get_students_by_group_id,
+    poll_broadcast_messages_for_platform,
 )
 
 bp = Blueprint("messages_v1", __name__, url_prefix="/api/v1/messages")
@@ -54,8 +55,8 @@ def send_message_route() -> tuple:
 
         if not data.get("from") and not (data.get("telegram_id") is not None or data.get("vk_id") is not None):
             raise ValueError("Flat bot payload must include either telegram_id or vk_id.")
-        if not data.get("from") and data.get("telegram_id") is not None and data.get("vk_id") is not None:
-            raise ValueError("Flat bot payload must include either telegram_id or vk_id, not both.")
+        # If both IDs are provided in the request, prefer telegram_id silently.
+        # Previously this raised an error; prefer telegram where available.
 
         if isinstance(message_data, str):
             message_data = {"type": "text", "text": message_data}
@@ -70,24 +71,34 @@ def send_message_route() -> tuple:
 
         if is_bot_flat_payload:
             from app.src.core.services import get_user_by_telegram_id, get_user_by_vk_id
-            
+
             user = None
+            # Lookup: prefer telegram lookup if provided, otherwise try vk
             if data.get("telegram_id") is not None:
                 user = get_user_by_telegram_id(int(data["telegram_id"]))
             elif data.get("vk_id") is not None:
                 user = get_user_by_vk_id(int(data["vk_id"]))
-            
+
             if user is None:
                 raise ValueError("Sender not found.")
             if user.role.role not in {"practitioner", "listener"}:
                 raise ValueError("Only practitioner or listener can send messages via flat payload.")
-            
-            sender = MessageSenderInput(
-                user_id=user.id,
-                role=user.role.role,
-                telegram_id=user.telegram_id,
-                vk_id=user.vk_id,
-            )
+
+            # Prefer telegram_id when the user has both IDs set in DB.
+            if user.telegram_id is not None:
+                sender = MessageSenderInput(
+                    user_id=user.id,
+                    role=user.role.role,
+                    telegram_id=user.telegram_id,
+                    vk_id=None,
+                )
+            else:
+                sender = MessageSenderInput(
+                    user_id=user.id,
+                    role=user.role.role,
+                    telegram_id=None,
+                    vk_id=user.vk_id,
+                )
         else:
             sender = MessageSenderInput(
                 user_id=(
@@ -226,6 +237,36 @@ def get_admin_messages_route() -> tuple:
         return jsonify({"error": str(error)}), 400
     except Exception as error:
         current_app.logger.error(f"Error fetching admin messages: {error}")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@bp.get("/broadcast/poll")
+def poll_broadcast_route() -> tuple:
+    """
+    Poll pending group broadcasts for delivery via Telegram or VK bot.
+
+    Query: platform=telegram | vk
+
+    Returns grouped broadcast text, recipient_bot_ids and recipients
+    (only telegram_id or vk_id for the requested platform).
+    Included messages are marked message_type=used_broadcast.
+  """
+    platform = request.args.get("platform")
+    if not platform:
+        return jsonify({"error": "platform query param is required (telegram or vk)."}), 200
+
+    try:
+        result = poll_broadcast_messages_for_platform(platform)
+        current_app.logger.info(
+            "broadcast poll platform=%s deliveries=%s",
+            result.get("platform"),
+            result.get("deliveries"),
+        )
+        return jsonify({"success": True, "kind": "broadcast_poll", **result}), 200
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 200
+    except Exception as error:
+        current_app.logger.error(f"Error polling broadcast messages: {error}")
         return jsonify({"error": "Internal server error"}), 500
 
 

@@ -98,6 +98,9 @@ def bot_auth_route() -> tuple:
             fullname=data.get("fullname"),
         )
         response = bot_authenticate(payload)
+
+        if response in {"wrong_password", "user_exist", "there is not such user"}:
+            return jsonify({"error": response}), 200
         return jsonify({"role": response}), 200
     except KeyError as error:
         return jsonify({"error": f"missing field: {error.args[0]}"}), 200

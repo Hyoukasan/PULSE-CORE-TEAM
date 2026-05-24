@@ -15,3 +15,4 @@ class Group(db.Model):
 
     students: so.Mapped[list["Student"]] = so.relationship(back_populates="group")
     professors: so.Mapped[list["Professor"]] = so.relationship(back_populates="group")
+    tasks: so.Mapped[list["Task"]] = so.relationship(back_populates="group", cascade="all, delete-orphan")

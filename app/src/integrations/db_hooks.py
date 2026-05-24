@@ -1,4 +1,5 @@
 from sqlalchemy import event
+from flask import after_this_request, has_request_context
 
 from app.src.integrations.db import db
 
@@ -35,24 +36,34 @@ def register_db_listeners(app) -> None:
         if not sync_types:
             return
 
-        callback_url = app.config.get("SYNC_CALLBACK_URL")
-        if not callback_url:
+        if not app.config.get("SYNC_CALLBACK_URL"):
             return
 
-        payload: dict = {}
-        if "groups" in sync_types:
-            payload["groups"] = export_groups_for_sheet()
-        if "users" in sync_types:
-            payload["users"] = export_users_for_sheet()
-        if "attendance" in sync_types:
-            payload["attendance"] = export_attendance_for_sheet()
+        types = set(sync_types)
 
-        if not payload:
-            return
-
-        try:
-            with app.app_context():
+        def send_sync_callback() -> None:
+            try:
+                db.session.remove()
+                payload: dict = {}
+                if "groups" in types:
+                    payload["groups"] = export_groups_for_sheet()
+                if "users" in types:
+                    payload["users"] = export_users_for_sheet()
+                if "attendance" in types:
+                    payload["attendance"] = export_attendance_for_sheet()
+                if not payload:
+                    return
                 send_sync_notification(payload)
-        except Exception:
-            # Do not interrupt the database commit path.
-            pass
+            except Exception:
+                app.logger.exception("Sync callback failed after commit")
+
+        if has_request_context():
+            @after_this_request
+            def _defer_sync_callback(response):
+                send_sync_callback()
+                return response
+
+            return
+
+        with app.app_context():
+            send_sync_callback()

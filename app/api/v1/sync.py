@@ -8,7 +8,12 @@ from app.src.core.services import (
     set_user_ban,
     sync_attendance_from_sheet,
 )
-from app.src.core.schemas import SheetAttendanceRow
+from app.src.core.schemas import SheetAttendanceRow, SheetLectureAttendanceRow, SheetLabScoreRow
+from app.src.core.progress_services import (
+    sync_lecture_dates_from_sheet,
+    sync_lecture_attendance_from_sheet,
+    sync_lab_scores_from_sheet,
+)
 
 bp = Blueprint("sync_v1", __name__, url_prefix="/sync")
 
@@ -125,3 +130,118 @@ def sync_attendance_route() -> tuple:
         return jsonify({"error": str(error)}), 200
 
     return jsonify({"results": results, "sync_result": sync_result}), 200
+
+
+@bp.post("/lecture-dates")
+def sync_lecture_dates_route() -> tuple:
+    auth_error = _verify_api_key()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json(silent=True) or {}
+    semester = data.get("semester")
+    dates = data.get("dates")
+    if semester is None:
+        return jsonify({"error": "semester is required."}), 200
+    if not isinstance(dates, list):
+        return jsonify({"error": "dates must be a list."}), 200
+
+    try:
+        result = sync_lecture_dates_from_sheet(int(semester), dates)
+        return jsonify(result), 200
+    except (TypeError, ValueError) as error:
+        return jsonify({"error": str(error)}), 200
+
+
+@bp.post("/lecture-attendance")
+def sync_lecture_attendance_route() -> tuple:
+    """
+    Lecture attendance from sheet (П). Prefer over /attendance when semester is known.
+
+    Body:
+    {
+      "semester": 2,
+      "students": [
+        {"email": "...", "date": "07.02.2026", "status": "present"}
+      ]
+    }
+    """
+    auth_error = _verify_api_key()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json(silent=True) or {}
+    semester = data.get("semester")
+    students = data.get("students") or data.get("rows")
+    if semester is None:
+        return jsonify({"error": "semester is required."}), 200
+    if not isinstance(students, list):
+        return jsonify({"error": "students must be a list."}), 200
+
+    rows = []
+    results = []
+    for index, student in enumerate(students):
+        email = student.get("email")
+        date_value = student.get("date")
+        status = student.get("status", "present")
+        if not email or not date_value:
+            results.append({"index": index, "status": "error", "error": "email and date are required"})
+            continue
+        attended = status in {"present", "п", "П", True}
+        if status in {"absent", "н", "Н", False}:
+            attended = False
+        try:
+            rows.append(
+                SheetLectureAttendanceRow(
+                    email=email,
+                    semester=int(semester),
+                    date=str(date_value),
+                    attended=attended,
+                )
+            )
+            results.append({"index": index, "email": email, "status": "ok"})
+        except ValueError as error:
+            results.append({"index": index, "email": email, "status": "error", "error": str(error)})
+
+    if not rows:
+        return jsonify({"results": results}), 200
+
+    try:
+        sync_result = sync_lecture_attendance_from_sheet(rows)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 200
+
+    return jsonify({"results": results, "sync_result": sync_result}), 200
+
+
+@bp.post("/grades")
+def sync_grades_route() -> tuple:
+    auth_error = _verify_api_key()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json(silent=True) or {}
+    semester = data.get("semester")
+    rows = data.get("rows") or data.get("students")
+    if semester is None:
+        return jsonify({"error": "semester is required."}), 200
+    if not isinstance(rows, list):
+        return jsonify({"error": "rows must be a list."}), 200
+
+    try:
+        payload_rows = [
+            SheetLabScoreRow(
+                email=row["email"],
+                semester=int(semester),
+                subject=row["subject"],
+                component=row["component"],
+                score=row.get("score"),
+            )
+            for row in rows
+        ]
+        result = sync_lab_scores_from_sheet(payload_rows)
+        return jsonify(result), 200
+    except KeyError as error:
+        return jsonify({"error": f"row missing field: {error.args[0]}"}), 200
+    except (TypeError, ValueError) as error:
+        return jsonify({"error": str(error)}), 200

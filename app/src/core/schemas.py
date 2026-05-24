@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .validators import (
+    normalize_component_code,
+    parse_calendar_date,
     validate_bot_email,
     validate_email,
     validate_group_name,
@@ -9,6 +11,8 @@ from .validators import (
     validate_non_empty,
     validate_password,
     validate_role,
+    validate_score,
+    validate_semester,
 )
 
 
@@ -280,6 +284,37 @@ class SheetAttendanceRow:
 
 
 @dataclass
+class SheetLectureAttendanceRow:
+    email: str
+    semester: int
+    date: str
+    attended: bool = True
+
+    def __post_init__(self) -> None:
+        self.email = validate_email(self.email)
+        self.semester = validate_semester(self.semester)
+        self.date = parse_calendar_date(self.date)
+        if not isinstance(self.attended, bool):
+            raise ValueError("attended must be a boolean.")
+
+
+@dataclass
+class SheetLabScoreRow:
+    email: str
+    semester: int
+    subject: str
+    component: str
+    score: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        self.email = validate_email(self.email)
+        self.semester = validate_semester(self.semester)
+        self.subject = validate_non_empty(self.subject, "subject")
+        self.component = normalize_component_code(self.component)
+        self.score = validate_score(self.score)
+
+
+@dataclass
 class AttendanceExcuseInput:
     email: str
     reason: str
@@ -436,3 +471,56 @@ class GetQueueForLessonInput:
             self.lesson_date = parsed
         except ValueError:
             raise ValueError("lesson_date must be a valid ISO 8601 datetime string.")
+
+
+@dataclass
+class CreateTaskInput:
+    """Создать новое задание."""
+    group_id: int
+    title: str
+    description: Optional[str] = None
+    file_url: Optional[str] = None
+    due_date: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.group_id <= 0:
+            raise ValueError("group_id must be > 0.")
+        self.title = validate_non_empty(self.title, "title")
+        if self.description is not None:
+            self.description = validate_non_empty(self.description, "description")
+        if self.file_url is not None:
+            self.file_url = validate_non_empty(self.file_url, "file_url")
+        if self.due_date is not None:
+            self.due_date = validate_non_empty(self.due_date, "due_date")
+            try:
+                from datetime import datetime as dt
+                parsed = dt.fromisoformat(self.due_date.replace('Z', '+00:00'))
+                self.due_date = parsed
+            except ValueError:
+                raise ValueError("due_date must be a valid ISO 8601 datetime string.")
+
+
+@dataclass
+class SubmitTaskResponseInput:
+    """Отправить ответ на задание."""
+    task_id: int
+    telegram_id: Optional[int] = None
+    vk_id: Optional[int] = None
+    response_text: Optional[str] = None
+    file_url: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.task_id <= 0:
+            raise ValueError("task_id must be > 0.")
+        if self.telegram_id is None and self.vk_id is None:
+            raise ValueError("telegram_id or vk_id must be provided.")
+        if self.telegram_id is not None and self.telegram_id <= 0:
+            raise ValueError("telegram_id must be > 0.")
+        if self.vk_id is not None and self.vk_id <= 0:
+            raise ValueError("vk_id must be > 0.")
+        if self.response_text is None and self.file_url is None:
+            raise ValueError("response_text or file_url must be provided.")
+        if self.response_text is not None:
+            self.response_text = validate_non_empty(self.response_text, "response_text")
+        if self.file_url is not None:
+            self.file_url = validate_non_empty(self.file_url, "file_url")

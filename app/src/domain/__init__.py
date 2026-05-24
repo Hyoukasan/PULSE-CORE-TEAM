@@ -8,3 +8,8 @@ from .attendance_record import AttendanceRecord
 from .attendance_excuse import AttendanceExcuse
 from .user_pass_key import UserPassKey
 from .approach_queue import ApproachQueue
+from .subject import Subject
+from .subject_component import SubjectComponent
+from .student_lab_score import StudentLabScore
+from .lecture_session import LectureSession
+from .task import Task, TaskResponse

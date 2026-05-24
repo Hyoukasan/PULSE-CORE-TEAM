@@ -14,5 +14,13 @@ class AttendanceRecord(db.Model):
     id: so.Mapped[int] = so.mapped_column(primary_key=True)
     student_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("students.id"), nullable=False, index=True)
     timestamp: so.Mapped[datetime] = so.mapped_column(sa.DateTime, nullable=False, default=datetime.utcnow)
+    lecture_session_id: so.Mapped[int | None] = so.mapped_column(
+        sa.ForeignKey("lecture_sessions.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
 
     student: so.Mapped["Student"] = so.relationship(back_populates="attendance_records")
+    lecture_session: so.Mapped["LectureSession | None"] = so.relationship(
+        back_populates="attendance_records",
+    )

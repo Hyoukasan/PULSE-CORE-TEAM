@@ -21,8 +21,10 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(v1.groups.bp)
     app.register_blueprint(v1.messages.bp)
     app.register_blueprint(v1.users.bp)
+    app.register_blueprint(v1.bans.bp)
     app.register_blueprint(v1.arduino.bp)
     app.register_blueprint(v1.queue.bp)
+    app.register_blueprint(v1.tasks.bp)
     app.register_blueprint(v1.google.bp)
     from app.api.v1.sync import bp as sync_bp
     app.register_blueprint(sync_bp)
@@ -314,6 +316,8 @@ def create_app(config_name="default"):
 
     with app.app_context():
         db.create_all()
+        from app.src.integrations.schema_migrations import apply_sqlite_schema_patches
+        apply_sqlite_schema_patches()
         seed_roles()
 
     # Загрузить публичный ключ для Arduino
