@@ -28,12 +28,21 @@ def _export_once(app) -> None:
                 "timestamp": int(time.time()),
             }
 
-            resp = requests.post(export_url, json=payload, timeout=30)
-            app.logger.info(f"DB export posted: status={resp.status_code}")
-        except Exception as e:
-            app.logger.error(f"Failed to post DB export: {e}\n{traceback.format_exc()}")
-        finally:
+            # Close the DB session before performing the network call so a slow/blocked
+            # POST does not hold DB connections or transactions and cause locks.
             db.session.remove()
+
+            try:
+                resp = requests.post(export_url, json=payload, timeout=30)
+                app.logger.info(f"DB export posted: status={resp.status_code}")
+            except Exception as e:
+                app.logger.error(f"Failed to post DB export: {e}\n{traceback.format_exc()}")
+        finally:
+            # Ensure session is removed in all cases.
+            try:
+                db.session.remove()
+            except Exception:
+                pass
 
 
 def _worker_loop(app, interval_seconds: int) -> None:

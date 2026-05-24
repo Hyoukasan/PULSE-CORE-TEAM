@@ -61,113 +61,6 @@ class AssignUserToGroupInput:
 
 
 @dataclass
-class AddToQueueInput:
-    student_id: int
-    professor_id: int
-    lesson_date: Optional[str] = None
-    labs_count: int = 1
-
-    def __post_init__(self) -> None:
-        if self.student_id <= 0:
-            raise ValueError("student_id must be > 0.")
-        if self.professor_id <= 0:
-            raise ValueError("professor_id must be > 0.")
-        if self.labs_count <= 0:
-            raise ValueError("labs_count must be > 0.")
-        if self.lesson_date is not None:
-            self.lesson_date = validate_non_empty(self.lesson_date, "lesson_date")
-            try:
-                from datetime import datetime as dt
-                parsed = dt.fromisoformat(self.lesson_date.replace('Z', '+00:00'))
-                self.lesson_date = parsed
-            except ValueError:
-                raise ValueError("lesson_date must be a valid ISO 8601 datetime string.")
-
-
-@dataclass
-class AddToQueueBotInput:
-    telegram_id: Optional[int] = None
-    vk_id: Optional[int] = None
-    labs_count: int = 1
-    lesson_date: Optional[str] = None
-
-    def __post_init__(self) -> None:
-        if self.telegram_id is None and self.vk_id is None:
-            raise ValueError("telegram_id or vk_id must be provided.")
-        if self.telegram_id is not None and self.telegram_id <= 0:
-            raise ValueError("telegram_id must be > 0.")
-        if self.vk_id is not None and self.vk_id <= 0:
-            raise ValueError("vk_id must be > 0.")
-        if self.labs_count <= 0:
-            raise ValueError("labs_count must be > 0.")
-        if self.lesson_date is not None:
-            self.lesson_date = validate_non_empty(self.lesson_date, "lesson_date")
-            try:
-                from datetime import datetime as dt
-                parsed = dt.fromisoformat(self.lesson_date.replace('Z', '+00:00'))
-                self.lesson_date = parsed
-            except ValueError:
-                raise ValueError("lesson_date must be a valid ISO 8601 datetime string.")
-
-
-@dataclass
-class RemoveFromQueueInput:
-    student_id: int
-    professor_id: int
-    lesson_date: str  # ISO 8601 datetime string
-
-    def __post_init__(self) -> None:
-        if self.student_id <= 0:
-            raise ValueError("student_id must be > 0.")
-        if self.professor_id <= 0:
-            raise ValueError("professor_id must be > 0.")
-        self.lesson_date = validate_non_empty(self.lesson_date, "lesson_date")
-        try:
-            from datetime import datetime as dt
-            parsed = dt.fromisoformat(self.lesson_date.replace('Z', '+00:00'))
-            self.lesson_date = parsed
-        except ValueError:
-            raise ValueError("lesson_date must be a valid ISO 8601 datetime string.")
-
-
-@dataclass
-class GetQueuePositionInput:
-    student_id: int
-    professor_id: int
-    lesson_date: str  # ISO 8601 datetime string
-
-    def __post_init__(self) -> None:
-        if self.student_id <= 0:
-            raise ValueError("student_id must be > 0.")
-        if self.professor_id <= 0:
-            raise ValueError("professor_id must be > 0.")
-        self.lesson_date = validate_non_empty(self.lesson_date, "lesson_date")
-        try:
-            from datetime import datetime as dt
-            parsed = dt.fromisoformat(self.lesson_date.replace('Z', '+00:00'))
-            self.lesson_date = parsed
-        except ValueError:
-            raise ValueError("lesson_date must be a valid ISO 8601 datetime string.")
-
-
-@dataclass
-class GetQueueForLessonInput:
-    professor_id: int
-    lesson_date: str  # ISO 8601 datetime string
-
-    def __post_init__(self) -> None:
-        if self.professor_id <= 0:
-            raise ValueError("professor_id must be > 0.")
-        self.lesson_date = validate_non_empty(self.lesson_date, "lesson_date")
-        try:
-            from datetime import datetime as dt
-            parsed = dt.fromisoformat(self.lesson_date.replace('Z', '+00:00'))
-            self.lesson_date = parsed
-        except ValueError:
-            raise ValueError("lesson_date must be a valid ISO 8601 datetime string.")
-
-
-@dataclass
 class MessagePayload:
     type: Optional[str]
     text: str
@@ -468,7 +361,8 @@ class GetQueueForLessonInput:
         try:
             from datetime import datetime as dt
             parsed = dt.fromisoformat(self.lesson_date.replace('Z', '+00:00'))
-            self.lesson_date = parsed
+            # Normalize to naive date-only datetime (midnight) to match stored queue entries
+            self.lesson_date = dt(parsed.year, parsed.month, parsed.day)
         except ValueError:
             raise ValueError("lesson_date must be a valid ISO 8601 datetime string.")
 

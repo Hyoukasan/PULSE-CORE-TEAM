@@ -10,6 +10,7 @@ import app.src.domain
 from .config import config
 from app.src.integrations.db import db
 from app.src.integrations.redis_client import init_redis
+from sqlalchemy import event
 
 
 def register_blueprints(app: Flask) -> None:
@@ -308,6 +309,22 @@ def create_app(config_name="default"):
     app.config.from_object(config[config_name])
 
     db.init_app(app)
+    # If using SQLite, tune PRAGMA to reduce locking and allow concurrent readers/writers.
+    try:
+        if app.config.get("SQLALCHEMY_DATABASE_URI", "").startswith("sqlite"):
+            engine = db.get_engine(app)
+
+            @event.listens_for(engine, "connect")
+            def _set_sqlite_pragmas(dbapi_connection, connection_record):
+                try:
+                    cursor = dbapi_connection.cursor()
+                    cursor.execute("PRAGMA journal_mode=WAL;")
+                    cursor.execute("PRAGMA synchronous=NORMAL;")
+                    cursor.close()
+                except Exception:
+                    app.logger.exception("Failed to set SQLite PRAGMA settings")
+    except Exception:
+        app.logger.exception("Failed to initialize SQLite PRAGMAs")
     from app.src.integrations.db_hooks import register_db_listeners
     register_db_listeners(app)
     init_redis(app)

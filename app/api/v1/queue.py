@@ -42,6 +42,7 @@ def add_to_queue_route() -> tuple:
     }
     """
     data = request.get_json(silent=True) or {}
+    current_app.logger.debug("Queue add request data: %s", data)
     try:
         if data.get("student_id") and data.get("professor_id"):
             result = add_to_queue(data)
@@ -51,9 +52,10 @@ def add_to_queue_route() -> tuple:
             return jsonify(result), 200
         return jsonify(result), 201
     except ValueError as error:
+        current_app.logger.info("Queue add validation failed: %s; data=%s", str(error), data)
         return jsonify({"error": str(error)}), 400
     except Exception as error:
-        current_app.logger.error(f"Error adding to queue: {error}")
+        current_app.logger.exception("Error adding to queue; data=%s", data)
         return jsonify({"error": "Internal server error"}), 500
 
 

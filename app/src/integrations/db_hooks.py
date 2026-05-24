@@ -43,7 +43,6 @@ def register_db_listeners(app) -> None:
 
         def send_sync_callback() -> None:
             try:
-                db.session.remove()
                 payload: dict = {}
                 if "groups" in types:
                     payload["groups"] = export_groups_for_sheet()
@@ -53,7 +52,21 @@ def register_db_listeners(app) -> None:
                     payload["attendance"] = export_attendance_for_sheet()
                 if not payload:
                     return
-                send_sync_notification(payload)
+
+                # Ensure any DB session is closed before performing the network call
+                # to avoid holding DB locks during HTTP requests.
+                try:
+                    db.session.remove()
+                except Exception:
+                    app.logger.exception("Failed to remove DB session before sync callback")
+
+                try:
+                    send_sync_notification(payload)
+                finally:
+                    try:
+                        db.session.remove()
+                    except Exception:
+                        pass
             except Exception:
                 app.logger.exception("Sync callback failed after commit")
 
