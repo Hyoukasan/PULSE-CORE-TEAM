@@ -14,7 +14,7 @@ from sqlalchemy import event
 
 
 def register_blueprints(app: Flask) -> None:
-    from app.api import v1    
+    from app.api import v1
 
     app.register_blueprint(v1.health.bp)
     app.register_blueprint(v1.auth.bp)
@@ -351,6 +351,883 @@ def create_app(config_name="default"):
         start_db_export_worker(app)
     except Exception:
         app.logger.exception("Failed to start DB export worker")
+#''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+    import json
+    from flask import request
 
+    @app.after_request
+    def inject_endpoint_params(response):
+        # Работаем только со спецификацией Swagger
+        if request.path.endswith('swagger.json') and response.content_type == 'application/json':
+            try:
+                spec = json.loads(response.get_data(as_text=True))
+
+                # 1. Arduino: /api/v1/arduino/verify
+                target_path = "/api/v1/arduino/verify"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "pass_key": {"type": "string", "description": "Ключ доступа устройства"},
+                                        "sign": {"type": "string", "description": "Криптографическая подпись данных"}
+                                    },
+                                    "required": ["pass_key", "sign"]
+                                }
+                            }
+                        }
+                    }
+
+                # 2. Attendance: /api/v1/attendance/excuse
+                target_path = "/api/v1/attendance/excuse"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "email": {"type": "string", "description": "Email студента"},
+                                        "reason": {"type": "string", "description": "Причина пропуска"},
+                                        "file_url": {"type": "string", "description": "Ссылка на документ (опционально)"},
+                                        "timestamp": {"type": "string", "description": "Временная метка (опционально)"}
+                                    },
+                                    "required": ["email", "reason"]
+                                }
+                            }
+                        }
+                    }
+
+                # 3. Attendance: /api/v1/attendance/pass
+                target_path = "/api/v1/attendance/pass"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "pass_id": {"type": "string", "description": "ID пропуска"}
+                                    },
+                                    "required": ["pass_id"]
+                                }
+                            }
+                        }
+                    }
+
+                # 4. Auth: /api/v1/auth/login
+                target_path = "/api/v1/auth/login"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "email": {"type": "string", "description": "Email пользователя"},
+                                        "password": {"type": "string", "description": "Пароль"},
+                                        "platform": {"type": "string", "description": "Платформа (опционально)"},
+                                        "vk_id": {"type": "integer", "description": "VK ID (опционально)"}
+                                    },
+                                    "required": ["email", "password"]
+                                }
+                            }
+                        }
+                    }
+
+                # 5. Auth: /api/v1/auth/verify
+                target_path = "/api/v1/auth/verify"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "email": {"type": "string", "description": "Email для проверки роли"}
+                                    },
+                                    "required": ["email"]
+                                }
+                            }
+                        }
+                    }
+
+                # 6. Auth: /api/v1/auth/bot
+                target_path = "/api/v1/auth/bot"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "action": {"type": "string", "description": "Действие бота"},
+                                        "mail": {"type": "string", "description": "Email"},
+                                        "password": {"type": "string", "description": "Пароль"},
+                                        "telegram_id": {"type": "integer", "description": "Telegram ID"},
+                                        "vk_id": {"type": "integer", "description": "VK ID"},
+                                        "fullname": {"type": "string", "description": "Полное имя"}
+                                    },
+                                    "required": ["action", "mail", "password"]
+                                }
+                            }
+                        }
+                    }
+
+                # 7. Bans: /api/v1/bans/ban (POST)
+                target_path = "/api/v1/bans/ban"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "from": {
+                                            "type": "object",
+                                            "description": "Идентификатор администратора",
+                                            "properties": {
+                                                "telegram_id": {"type": "integer"},
+                                                "admin_id": {"type": "integer"}
+                                            }
+                                        },
+                                        "target": {
+                                            "type": "object",
+                                            "description": "Идентификатор пользователя для бана",
+                                            "properties": {
+                                                "telegram_id": {"type": "integer"},
+                                                "email": {"type": "string"}
+                                            }
+                                        },
+                                        "permanent": {"type": "boolean", "description": "Постоянная блокировка"},
+                                        "ban_expires_at": {"type": "string", "description": "Дата окончания бана (ISO 8601)"}
+                                    },
+                                    "required": ["from", "target"]
+                                }
+                            }
+                        }
+                    }
+
+                # 8. Bans: /api/v1/bans/unban (POST)
+                target_path = "/api/v1/bans/unban"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "from": {
+                                            "type": "object",
+                                            "description": "Идентификатор администратора",
+                                            "properties": {
+                                                "telegram_id": {"type": "integer"},
+                                                "admin_id": {"type": "integer"}
+                                            }
+                                        },
+                                        "target": {
+                                            "type": "object",
+                                            "description": "Идентификатор пользователя для разбана",
+                                            "properties": {
+                                                "telegram_id": {"type": "integer"},
+                                                "email": {"type": "string"}
+                                            }
+                                        }
+                                    },
+                                    "required": ["from", "target"]
+                                }
+                            }
+                        }
+                    }
+
+                # 9. Bans: /api/v1/bans (GET)
+                target_path = "/api/v1/bans"
+                if target_path in spec.get('paths', {}):
+                    # Для GET-запросов параметры указываются в query, а не в requestBody
+                    spec['paths'][target_path]['get']['parameters'] = [
+                        {
+                            "name": "admin_telegram_id",
+                            "in": "query",
+                            "description": "ID администратора в Telegram (для проверки прав)",
+                            "schema": {"type": "integer"}
+                        }
+                    ]
+
+                # 10. Google Sheets: /api/v1/google/in (POST)
+                target_path = "/api/v1/google/in"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "rows": {
+                                            "type": "array",
+                                            "description": "Список строк для импорта",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "email": {"type": "string", "description": "Email студента"},
+                                                    "fullname": {"type": "string", "description": "ФИО"},
+                                                    "group_number": {"type": "string", "description": "Номер группы"},
+                                                    "pass_id": {"type": "string", "description": "ID пропуска"},
+                                                    "missed_passes": {"type": "integer", "description": "Количество пропусков"}
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "required": ["rows"]
+                                }
+                            }
+                        }
+                    }
+
+                # 11. Google Sheets: /api/v1/google/in-attendance (POST)
+                target_path = "/api/v1/google/in-attendance"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "rows": {
+                                            "type": "array",
+                                            "description": "Список записей посещаемости",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "email": {"type": "string", "description": "Email студента"},
+                                                    "timestamp": {"type": "string", "description": "Временная метка (ISO 8601)"},
+                                                    "attended": {"type": "boolean", "description": "Факт присутствия"}
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "required": ["rows"]
+                                }
+                            }
+                        }
+                    }
+
+                # 12. Google Sheets: /api/v1/google/in-lecture-dates (POST)
+                target_path = "/api/v1/google/in-lecture-dates"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "semester": {"type": "integer", "description": "Номер семестра (1 или 2)"},
+                                        "dates": {"type": "array", "items": {"type": "string"}, "description": "Список дат лекций"}
+                                    },
+                                    "required": ["semester", "dates"]
+                                }
+                            }
+                        }
+                    }
+
+                # 13. Google Sheets: /api/v1/google/out-lecture-dates (GET)
+                target_path = "/api/v1/google/out-lecture-dates"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['get']['parameters'] = [
+                        {"name": "semester", "in": "query", "required": True, "description": "Номер семестра (1 или 2)", "schema": {"type": "integer"}}
+                    ]
+
+                # 14. Google Sheets: /api/v1/google/in-lecture-attendance (POST)
+                target_path = "/api/v1/google/in-lecture-attendance"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "semester": {"type": "integer", "description": "Номер семестра"},
+                                        "rows": {
+                                            "type": "array",
+                                            "description": "Список посещений лекций",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "email": {"type": "string", "description": "Email студента"},
+                                                    "date": {"type": "string", "description": "Дата лекции (YYYY-MM-DD)"},
+                                                    "attended": {"type": "boolean", "description": "Присутствовал ли"}
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "required": ["semester", "rows"]
+                                }
+                            }
+                        }
+                    }
+
+                # 15. Google Sheets: /api/v1/google/out-lecture-attendance (GET)
+                target_path = "/api/v1/google/out-lecture-attendance"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['get']['parameters'] = [
+                        {"name": "semester", "in": "query", "required": True, "description": "Номер семестра (1 или 2)", "schema": {"type": "integer"}}
+                    ]
+
+                # 16. Google Sheets: /api/v1/google/in-grades (POST)
+                target_path = "/api/v1/google/in-grades"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "semester": {"type": "integer", "description": "Номер семестра"},
+                                        "rows": {
+                                            "type": "array",
+                                            "description": "Список оценок",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "email": {"type": "string", "description": "Email студента"},
+                                                    "subject": {"type": "string", "description": "Название предмета"},
+                                                    "component": {"type": "string", "description": "Компонент оценки (напр. LR1)"},
+                                                    "score": {"type": "integer", "description": "Балл за компонент"}
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "required": ["semester", "rows"]
+                                }
+                            }
+                        }
+                    }
+
+                # 17. Google Sheets: /api/v1/google/out-grades (GET)
+                target_path = "/api/v1/google/out-grades"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['get']['parameters'] = [
+                        {"name": "semester", "in": "query", "required": True, "description": "Номер семестра (1 или 2)", "schema": {"type": "integer"}}
+                    ]
+
+                # 18. Google Sheets: /api/v1/google/out-grades-layout (GET)
+                target_path = "/api/v1/google/out-grades-layout"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['get']['parameters'] = [
+                        {"name": "semester", "in": "query", "required": True, "description": "Номер семестра (1 или 2)", "schema": {"type": "integer"}}
+                    ]
+
+                # 19. Groups: /api/v1/groups/assign (POST)
+                target_path = "/api/v1/groups/assign"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "user_id": {"type": "integer", "description": "ID пользователя"},
+                                        "group_number": {"type": "string", "description": "Номер группы"}
+                                    },
+                                    "required": ["user_id", "group_number"]
+                                }
+                            }
+                        }
+                    }
+
+                # 20. Groups: /api/v1/groups/sync (POST)
+                target_path = "/api/v1/groups/sync"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "rows": {
+                                            "type": "array",
+                                            "description": "Список групп для синхронизации",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "number": {"type": "string", "description": "Номер группы"},
+                                                    "name": {"type": "string", "description": "Название группы"}
+                                                },
+                                                "required": ["number", "name"]
+                                            }
+                                        }
+                                    },
+                                    "required": ["rows"]
+                                }
+                            }
+                        }
+                    }
+
+                # 21. Messages: /api/v1/messages/send (POST)
+                target_path = "/api/v1/messages/send"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "from": {
+                                            "type": "object",
+                                            "description": "Данные отправителя",
+                                            "properties": {
+                                                "user_id": {"type": "integer"},
+                                                "admin_id": {"type": "integer"},
+                                                "role": {"type": "string"},
+                                                "email": {"type": "string"},
+                                                "fullname": {"type": "string"},
+                                                "group": {"type": "string"},
+                                                "platform": {"type": "string"},
+                                                "telegram_id": {"type": "integer"},
+                                                "vk_id": {"type": "integer"}
+                                            }
+                                        },
+                                        "message": {
+                                            "type": "object",
+                                            "description": "Текст сообщения",
+                                            "properties": {
+                                                "type": {"type": "string"},
+                                                "text": {"type": "string", "description": "Текст сообщения (обязательно)"},
+                                                "timestamp": {"type": "string"}
+                                            },
+                                            "required": ["text"]
+                                        },
+                                        "to_user_id": {"type": "integer", "description": "ID получателя"},
+                                        "to_telegram_id": {"type": "integer", "description": "Telegram ID получателя"},
+                                        "to_vk_id": {"type": "integer", "description": "VK ID получателя"},
+                                        "to_group_number": {"type": "string", "description": "Номер группы для рассылки"},
+                                        # Flat bot payload (альтернативный формат)
+                                        "telegram_id": {"type": "integer", "description": "Telegram ID бота (если нет from)"},
+                                        "vk_id": {"type": "integer", "description": "VK ID бота (если нет from)"},
+                                        "type": {"type": "string", "description": "Тип сообщения (если message не объект)"},
+                                        "text": {"type": "string", "description": "Текст сообщения (если message не объект)"}
+                                    },
+                                    "required": ["message"]
+                                }
+                            }
+                        }
+                    }
+
+                # 22. Messages: /api/v1/messages (GET)
+                target_path = "/api/v1/messages"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['get']['parameters'] = [
+                        {"name": "telegram_id", "in": "query", "description": "Telegram ID для получения сообщений", "schema": {"type": "integer"}},
+                        {"name": "vk_id", "in": "query", "description": "VK ID для получения сообщений", "schema": {"type": "integer"}}
+                    ]
+
+                # 23. Messages: /api/v1/messages/broadcast/poll (GET)
+                target_path = "/api/v1/messages/broadcast/poll"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['get']['parameters'] = [
+                        {"name": "platform", "in": "query", "required": True, "description": "Платформа: telegram или vk", "schema": {"type": "string", "enum": ["telegram", "vk"]}}
+                    ]
+
+                # 24. Messages: /api/v1/messages/{user_id} (GET)
+                target_path = "/api/v1/messages/{user_id}"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['get']['parameters'] = [
+                        {"name": "user_id", "in": "path", "required": True, "description": "ID пользователя или бота", "schema": {"type": "integer"}}
+                    ]
+
+                # 25. Messages: /api/v1/messages/groups/{group_id}/students (GET)
+                target_path = "/api/v1/messages/groups/{group_id}/students"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['get']['parameters'] = [
+                        {"name": "group_id", "in": "path", "required": True, "description": "ID группы", "schema": {"type": "integer"}}
+                    ]
+
+                # 26. Queue: /api/v1/queue/add (POST)
+                target_path = "/api/v1/queue/add"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        # Direct payload
+                                        "student_id": {"type": "integer", "description": "ID студента"},
+                                        "professor_id": {"type": "integer", "description": "ID преподавателя"},
+                                        # Bot payload
+                                        "telegram_id": {"type": "integer", "description": "Telegram ID бота"},
+                                        "vk_id": {"type": "integer", "description": "VK ID бота"},
+                                        # Общие поля
+                                        "lesson_date": {"type": "string", "description": "Дата занятия (ISO 8601)"},
+                                        "labs_count": {"type": "integer", "description": "Количество лабораторных"}
+                                    },
+                                    "oneOf": [
+                                        {"required": ["student_id", "professor_id", "lesson_date"]},
+                                        {"required": ["telegram_id", "lesson_date"]},
+                                        {"required": ["vk_id", "lesson_date"]}
+                                    ]
+                                }
+                            }
+                        }
+                    }
+
+                # 27. Queue: /api/v1/queue/remove (POST)
+                target_path = "/api/v1/queue/remove"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        # Direct payload
+                                        "student_id": {"type": "integer", "description": "ID студента"},
+                                        "professor_id": {"type": "integer", "description": "ID преподавателя"},
+                                        # Bot payload
+                                        "telegram_id": {"type": "integer", "description": "Telegram ID бота"},
+                                        "vk_id": {"type": "integer", "description": "VK ID бота"},
+                                        # Общее поле
+                                        "lesson_date": {"type": "string", "description": "Дата занятия (ISO 8601)"}
+                                    },
+                                    "oneOf": [
+                                        {"required": ["student_id", "professor_id", "lesson_date"]},
+                                        {"required": ["telegram_id", "lesson_date"]},
+                                        {"required": ["vk_id", "lesson_date"]}
+                                    ]
+                                }
+                            }
+                        }
+                    }
+
+                # 28. Queue: /api/v1/queue/position (POST)
+                target_path = "/api/v1/queue/position"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        # Direct payload
+                                        "student_id": {"type": "integer", "description": "ID студента"},
+                                        "professor_id": {"type": "integer", "description": "ID преподавателя"},
+                                        # Bot payload
+                                        "telegram_id": {"type": "integer", "description": "Telegram ID бота"},
+                                        "vk_id": {"type": "integer", "description": "VK ID бота"},
+                                        # Общее поле
+                                        "lesson_date": {"type": "string", "description": "Дата занятия (ISO 8601)"}
+                                    },
+                                    "oneOf": [
+                                        {"required": ["student_id", "professor_id", "lesson_date"]},
+                                        {"required": ["telegram_id", "lesson_date"]},
+                                        {"required": ["vk_id", "lesson_date"]}
+                                    ]
+                                }
+                            }
+                        }
+                    }
+
+                # 29. Queue: /api/v1/queue/lesson/{lesson_date} (GET)
+                target_path = "/api/v1/queue/lesson/{lesson_date}"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['get']['parameters'] = [
+                        {"name": "lesson_date", "in": "path", "required": True, "description": "Дата занятия (строка)", "schema": {"type": "string"}}
+                    ]
+
+                # 30. Queue: /api/v1/queue/lesson/{professor_id}/{lesson_date} (GET)
+                target_path = "/api/v1/queue/lesson/{professor_id}/{lesson_date}"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['get']['parameters'] = [
+                        {"name": "professor_id", "in": "path", "required": True, "description": "ID преподавателя", "schema": {"type": "integer"}},
+                        {"name": "lesson_date", "in": "path", "required": True, "description": "Дата занятия (строка)", "schema": {"type": "string"}}
+                    ]
+
+                # 31. Sync: /sync/ban (POST)
+                target_path = "/sync/ban"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "students": {
+                                            "type": "array",
+                                            "description": "Список студентов для обновления статуса бана",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "email": {"type": "string", "description": "Email студента"},
+                                                    "ban": {"type": "boolean", "description": "true = забанить, false = разбанить"},
+                                                    "ban_expires_at": {"type": "string", "description": "Дата окончания бана (ISO 8601, опционально)"}
+                                                },
+                                                "required": ["email", "ban"]
+                                            }
+                                        }
+                                    },
+                                    "required": ["students"]
+                                }
+                            }
+                        }
+                    }
+
+                # 32. Sync: /sync/attendance (POST)
+                target_path = "/sync/attendance"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "students": {
+                                            "type": "array",
+                                            "description": "Список записей посещаемости",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "email": {"type": "string", "description": "Email студента"},
+                                                    "date": {"type": "string", "description": "Дата (формат: ГГГГ-ММ-ДД)"},
+                                                    "status": {"type": "string", "enum": ["present", "absent"], "description": "Статус присутствия"}
+                                                },
+                                                "required": ["email", "date", "status"]
+                                            }
+                                        }
+                                    },
+                                    "required": ["students"]
+                                }
+                            }
+                        }
+                    }
+
+                # 33. Sync: /sync/lecture-dates (POST)
+                target_path = "/sync/lecture-dates"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "semester": {"type": "integer", "description": "Номер семестра (1 или 2)"},
+                                        "dates": {"type": "array", "items": {"type": "string"}, "description": "Список дат лекций"}
+                                    },
+                                    "required": ["semester", "dates"]
+                                }
+                            }
+                        }
+                    }
+
+                # 34. Sync: /sync/lecture-attendance (POST)
+                target_path = "/sync/lecture-attendance"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "semester": {"type": "integer", "description": "Номер семестра"},
+                                        "students": {
+                                            "type": "array",
+                                            "description": "Список посещений лекций",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "email": {"type": "string", "description": "Email студента"},
+                                                    "date": {"type": "string", "description": "Дата лекции"},
+                                                    "status": {"type": "string", "description": "Статус (present/absent)"}
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "required": ["semester", "students"]
+                                }
+                            }
+                        }
+                    }
+
+                # 35. Sync: /sync/grades (POST)
+                target_path = "/sync/grades"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "semester": {"type": "integer", "description": "Номер семестра"},
+                                        "rows": {
+                                            "type": "array",
+                                            "description": "Список оценок",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "email": {"type": "string", "description": "Email студента"},
+                                                    "subject": {"type": "string", "description": "Название предмета"},
+                                                    "component": {"type": "string", "description": "Компонент (напр. LR1)"},
+                                                    "score": {"type": "integer", "description": "Балл"}
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "required": ["semester", "rows"]
+                                }
+                            }
+                        }
+                    }
+
+                # 36. Tasks: /api/v1/tasks/create (POST)
+                target_path = "/api/v1/tasks/create"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "group_id": {"type": "integer", "description": "ID группы"},
+                                        "title": {"type": "string", "description": "Название задания"},
+                                        "description": {"type": "string", "description": "Описание задания"},
+                                        "file_url": {"type": "string", "description": "Ссылка на файл задания"},
+                                        "due_date": {"type": "string", "description": "Дедлайн (ISO 8601)"}
+                                    },
+                                    "required": ["group_id", "title"]
+                                }
+                            }
+                        }
+                    }
+
+                # 37. Tasks: /api/v1/tasks/list (GET)
+                target_path = "/api/v1/tasks/list"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['get']['parameters'] = [
+                        {"name": "telegram_id", "in": "query", "description": "Telegram ID студента", "schema": {"type": "integer"}},
+                        {"name": "vk_id", "in": "query", "description": "VK ID студента", "schema": {"type": "integer"}}
+                    ]
+
+                # 38. Tasks: /api/v1/tasks/{task_id}/submit (POST)
+                target_path = "/api/v1/tasks/{task_id}/submit"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['parameters'] = [
+                        {"name": "task_id", "in": "path", "required": True, "description": "ID задания", "schema": {"type": "integer"}}
+                    ]
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "telegram_id": {"type": "integer", "description": "Telegram ID студента"},
+                                        "vk_id": {"type": "integer", "description": "VK ID студента"},
+                                        "response_text": {"type": "string", "description": "Текст ответа"},
+                                        "file_url": {"type": "string", "description": "Ссылка на файл с решением"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                # 39. Tasks: /api/v1/tasks/{task_id}/responses (GET)
+                target_path = "/api/v1/tasks/{task_id}/responses"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['get']['parameters'] = [
+                        {"name": "task_id", "in": "path", "required": True, "description": "ID задания", "schema": {"type": "integer"}}
+                    ]
+
+                # 40. Users: /api/v1/users/register (POST)
+                target_path = "/api/v1/users/register"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "username": {"type": "string", "description": "Имя пользователя"},
+                                        "email": {"type": "string", "description": "Email (университетский)"},
+                                        "password": {"type": "string", "description": "Пароль (мин. 8 символов)"},
+                                        "role": {"type": "string", "description": "Роль: practitioner или listener", "default": "practitioner"},
+                                        "fullname": {"type": "string", "description": "Полное имя (опционально)"}
+                                    },
+                                    "required": ["username", "email", "password"]
+                                }
+                            }
+                        }
+                    }
+
+                # 41. Users: /api/v1/users/{user_id} (GET)
+                target_path = "/api/v1/users/{user_id}"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['get']['parameters'] = [
+                        {"name": "user_id", "in": "path", "required": True, "description": "ID пользователя", "schema": {"type": "integer"}}
+                    ]
+
+                # 42. Users: /api/v1/users/ban (POST)
+                target_path = "/api/v1/users/ban"
+                if target_path in spec.get('paths', {}):
+                    spec['paths'][target_path]['post']['requestBody'] = {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        # Идентификатор администратора (один из трёх)
+                                        "admin_id": {"type": "integer", "description": "ID администратора"},
+                                        "admin_telegram_id": {"type": "integer", "description": "Telegram ID администратора"},
+                                        "admin_vk_id": {"type": "integer", "description": "VK ID администратора"},
+                                        # Идентификатор целевого пользователя (один из четырёх)
+                                        "user_id": {"type": "integer", "description": "ID пользователя для бана"},
+                                        "target_user_id": {"type": "integer", "description": "Альтернативный ID пользователя"},
+                                        "target_telegram_id": {"type": "integer", "description": "Telegram ID пользователя"},
+                                        "target_vk_id": {"type": "integer", "description": "VK ID пользователя"},
+                                        # Параметры бана
+                                        "ban_expires_at": {"type": "string", "description": "Дата окончания бана (ISO 8601) или null для разбана"},
+                                        "permanent": {"type": "boolean", "description": "Постоянный бан (игнорирует ban_expires_at)"}
+                                    },
+                                    "oneOf": [
+                                        {"required": ["admin_id", "user_id"]},
+                                        {"required": ["admin_telegram_id", "target_telegram_id"]},
+                                        {"required": ["admin_vk_id", "target_vk_id"]}
+                                    ]
+                                }
+                            }
+                        }
+                    }
+
+                response.set_data(json.dumps(spec, ensure_ascii=False))
+            except Exception:
+                pass  # Не ломаем ответ, если что-то пошло не так
+
+        return response
+    # ============================================
     return app
-
